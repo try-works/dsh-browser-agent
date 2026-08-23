@@ -25,6 +25,7 @@ const isHostExternal = (specifier: string): boolean =>
 
 const isClientExternal = (specifier: string): boolean =>
   specifier === 'react' || specifier.startsWith('react/')
+  || specifier === 'react-dom' || specifier.startsWith('react-dom/')
 
 const host = defineConfig({
   name: CLIENT_ID,

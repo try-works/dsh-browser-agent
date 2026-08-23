@@ -34,6 +34,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: the base SlotMap table.
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
@@ -107,7 +108,7 @@ function saveWidth(width: number): void {
 }
 
 const railStyle: CSSProperties = {
-  position: 'absolute',
+  position: 'fixed',
   top: 0,
   right: 0,
   bottom: 0,
@@ -136,7 +137,7 @@ const handleStyle: CSSProperties = {
 }
 
 const panelStyle: CSSProperties = {
-  position: 'absolute',
+  position: 'fixed',
   top: 0,
   right: 0,
   bottom: 0,
@@ -268,6 +269,36 @@ function BrowserPane(): ReturnType<typeof h> {
     return () => { source.close() }
   }, [])
 
+  // Reserve horizontal space for the pane/rail on the page body so the whole
+  // GUI reflows around it like a real column: the AppFrame measures its own
+  // box with a ResizeObserver, so shrinking the body recomputes the
+  // sidebar/center/details columns. The pane itself is portaled to the body
+  // and fixed to the right edge inside the reserved strip.
+  useEffect(() => {
+    const style = document.body.style
+    const previous = style.marginRight
+    const apply = (): void => {
+      style.marginRight = `${collapsed ? RAIL_WIDTH : width}px`
+    }
+    apply()
+    return () => {
+      style.marginRight = previous
+    }
+  }, [collapsed, width])
+
+  // Smooth the reflow during collapse/expand (paused while the drag handle is
+  // active so the columns track the pointer instead of easing behind it).
+  useEffect(() => {
+    const tag = document.createElement('style')
+    tag.dataset.plugin = 'dsh-browser-pane'
+    tag.textContent =
+      'body { transition: margin-right 160ms ease; }'
+      + ' body.dsh-browser-resizing { transition: none; }'
+      + ' @media (prefers-reduced-motion: reduce) { body { transition: none; } }'
+    document.head.appendChild(tag)
+    return () => { tag.remove() }
+  }, [])
+
   const post = (path: string, body: PanePostBody): void => {
     void fetch(path, {
       method: 'POST',
@@ -384,10 +415,13 @@ function BrowserPane(): ReturnType<typeof h> {
 
   // Left-edge resize: pointer capture on the handle, width follows the drag
   // (pane is right-docked, so dragging left widens it), clamped and persisted.
+  // While dragging, the body reflow transition is paused so the columns track
+  // the pointer instead of easing behind it.
   const onHandleDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     resizeRef.current = { startX: event.clientX, startWidth: widthRef.current }
+    document.body.classList.add('dsh-browser-resizing')
   }
 
   const onHandleMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
@@ -404,6 +438,7 @@ function BrowserPane(): ReturnType<typeof h> {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
+    document.body.classList.remove('dsh-browser-resizing')
     saveWidth(widthRef.current)
   }
 
@@ -416,12 +451,12 @@ function BrowserPane(): ReturnType<typeof h> {
   }
 
   if (collapsed) {
-    return h('div', { style: railStyle, 'data-dsh-browser-pane': 'collapsed' },
+    return createPortal(h('div', { style: railStyle, 'data-dsh-browser-pane': 'collapsed' },
       h(ToggleButton, { expanded: false, onClick: () => { setCollapsed(false) }, vertical: true }),
       h('span', { style: statusDot, title: state.active ? 'Browser connected' : 'Browser idle' }),
       h('span', {
         style: { color: C.dim, fontSize: 11, letterSpacing: '0.12em', writingMode: 'vertical-rl', userSelect: 'none' },
-      }, 'Browser'))
+      }, 'Browser')), document.body)
   }
 
   const body = state.active && frame
@@ -446,7 +481,7 @@ function BrowserPane(): ReturnType<typeof h> {
         : 'The shared browser is idle — the agent has not opened a page yet. '
           + 'Use the address bar above to open one, or ask the agent to browse.')
 
-  return h('div', { style: { ...panelStyle, width }, 'data-dsh-browser-pane': 'expanded' },
+  return createPortal(h('div', { style: { ...panelStyle, width }, 'data-dsh-browser-pane': 'expanded' },
     h('div', {
       style: handleStyle,
       title: 'Drag to resize',
@@ -485,7 +520,7 @@ function BrowserPane(): ReturnType<typeof h> {
             flexShrink: 0,
           },
         }, 'Go'))),
-    body)
+    body), document.body)
 }
 
 /**
