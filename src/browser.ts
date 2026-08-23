@@ -268,14 +268,17 @@ export class BrowserRuntime {
   private async launchStealthBrowser(): Promise<Browser> {
     const { spawn } = await import('node:child_process')
     const { connect } = await import('puppeteer-core')
-    const { existsSync, mkdirSync, readFileSync } = await import('node:fs')
+    const { existsSync, mkdirSync, readFileSync, rmSync } = await import('node:fs')
     const cfg = this.config
     const profileDir = cfg.userDataDir !== ''
       ? cfg.userDataDir
       : join(homedir(), '.dsh', 'browser-stealth-profile')
     mkdirSync(profileDir, { recursive: true })
+    // A leftover DevToolsActivePort file belongs to a previous (possibly
+    // force-killed) instance; only OUR spawn may write the one we read.
+    const portFile = join(profileDir, 'DevToolsActivePort')
+    rmSync(portFile, { force: true })
     const args = [
-      '--no-sandbox',
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-background-timer-throttling',
@@ -293,7 +296,6 @@ export class BrowserRuntime {
       if (this.stealthChild === child) this.stealthChild = null
     })
     // Chrome writes `<port>\n<ws-path>` here once the debug server is up.
-    const portFile = join(profileDir, 'DevToolsActivePort')
     let portLine = ''
     for (let attempt = 0; attempt < 100; attempt++) {
       if (existsSync(portFile)) {
@@ -310,6 +312,18 @@ export class BrowserRuntime {
       this.stealthChild = null
       child.kill()
       throw new Error('stealth launch failed: Chrome never wrote its DevToolsActivePort file')
+    }
+    // Hand-off detection: with a profile already held by another Chrome
+    // instance, our spawn exits immediately (Chrome forwards to the running
+    // instance) and the DevToolsActivePort file we just read belongs to that
+    // OTHER instance — usually an orphaned plugin Chrome from a previous
+    // process. Connecting to it would silently drive the wrong browser.
+    if (child.exitCode !== null) {
+      this.stealthChild = null
+      throw new Error(
+        `stealth launch failed: another Chrome instance is already using the profile ${profileDir} `
+        + '(the launched process exited immediately). Close that instance (or remove leftover chrome processes) and retry.',
+      )
     }
     const browser = await connect({ browserURL: `http://127.0.0.1:${portLine}` })
     this.owned = true
