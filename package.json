@@ -1,7 +1,7 @@
 {
   "name": "@try-works/dsh-browser-agent",
   "description": "DeepSeek Harness bundle: a Chrome browser for agents (browser_goto / browser_evaluate / browser_screenshot tools) with a live two-way pane inside the DSH Web GUI. The browser engine is a fork of zenbu-labs/terminal-browser with the React Ink terminal UI replaced by a DSH tool surface and web pane.",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

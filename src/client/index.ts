@@ -54,7 +54,7 @@ interface PaneState {
   active: boolean
   url: string
   error?: string
-  mode: 'own' | 'connect'
+  mode: 'own' | 'stealth' | 'connect'
 }
 
 /** One tab row (mirrors the host TabInfo payload). */
@@ -73,7 +73,7 @@ type PaneInputMessage =
   | { type: 'key-up'; key: string; code: string; modifiers: number }
 
 /** Every body the pane routes accept (mirrors the host schemas). */
-type PanePostBody = PaneInputMessage | { url?: string } | { index: number } | { action: 'back' | 'forward' | 'reload' } | { mode: 'own' | 'connect' }
+type PanePostBody = PaneInputMessage | { url?: string } | { index: number } | { action: 'back' | 'forward' | 'reload' } | { mode: 'own' | 'stealth' | 'connect' }
 
 /** Required services: the slot registry (client runtime). */
 export const inject = ['slots']
@@ -610,7 +610,8 @@ function BrowserPane(): ReturnType<typeof h> {
       },
       title: 'Which browser the agent drives',
     },
-      h(ModeButton, { label: 'Plugin', active: state.mode === 'own', onClick: () => { post('/browser-pane/mode', { mode: 'own' }) } }),
+      h(ModeButton, { label: 'Headless', active: state.mode === 'own', onClick: () => { post('/browser-pane/mode', { mode: 'own' }) } }),
+      h(ModeButton, { label: 'Plugin', active: state.mode === 'stealth', onClick: () => { post('/browser-pane/mode', { mode: 'stealth' }) } }),
       h(ModeButton, { label: 'My Chrome', active: state.mode === 'connect', onClick: () => { post('/browser-pane/mode', { mode: 'connect' }) } })))
 
   const body = state.active && frame

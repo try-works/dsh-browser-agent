@@ -61,7 +61,7 @@ export interface PaneState {
   active: boolean
   url: string
   error?: string
-  mode: 'own' | 'connect'
+  mode: 'own' | 'stealth' | 'connect'
 }
 
 /** One input event the pane client sends (JSON-safe wire shape). */
@@ -125,7 +125,7 @@ const PaneTabIndexSchema = z.object({
 
 /** Boundary schema for the browser-mode toggle route. */
 const PaneModeSchema = z.object({
-  mode: z.union([z.const('own' as const), z.const('connect' as const)]),
+  mode: z.union([z.const('own' as const), z.const('stealth' as const), z.const('connect' as const)]),
 })
 
 /** JSON response bodies the pane routes answer with. */

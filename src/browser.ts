@@ -132,7 +132,7 @@ export interface TabInfo {
 }
 
 /** Which browser the session drives. */
-export type BrowserMode = 'own' | 'connect'
+export type BrowserMode = 'own' | 'stealth' | 'connect'
 
 /**
  * Headless browser runtime. One instance per plugin fiber; `close()` is the
@@ -164,7 +164,11 @@ export class BrowserRuntime {
   /** Tab-set listeners (the pane restarts its screencast on switches). */
   private readonly tabListeners = new Set<(tabs: TabInfo[]) => void>()
 
-  constructor(private readonly config: ResolvedConfig) {}
+  constructor(private readonly config: ResolvedConfig) {
+    // The `stealth` config picks the STARTUP plugin mode; the pane toggle
+    // switches modes live from then on.
+    this.mode = config.stealth ? 'stealth' : 'own'
+  }
 
   /** The current browser mode. */
   currentMode(): BrowserMode {
@@ -218,9 +222,8 @@ export class BrowserRuntime {
     })
   }
 
-  /** Launch our own Chrome instance (mode 'own'). */
+  /** Launch our own Chrome instance (mode 'own': plain puppeteer, headless by default). */
   private async launchBrowser(): Promise<Browser> {
-    if (this.config.stealth) return this.launchStealthBrowser()
     const { launch } = await import('puppeteer-core')
     const cfg = this.config
     const headed = cfg.headed
@@ -366,7 +369,13 @@ export class BrowserRuntime {
   /** Ensure a browser exists for the current mode; idempotent. */
   private async ensureBrowser(): Promise<Browser> {
     if (this.browser && this.browser.connected) return this.browser
-    this.browser = this.mode === 'connect' ? await this.connectBrowser() : await this.launchBrowser()
+    if (this.mode === 'connect') {
+      this.browser = await this.connectBrowser()
+    } else if (this.mode === 'stealth') {
+      this.browser = await this.launchStealthBrowser()
+    } else {
+      this.browser = await this.launchBrowser()
+    }
     this.notifyTabs()
     return this.browser
   }
