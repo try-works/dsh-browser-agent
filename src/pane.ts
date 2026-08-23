@@ -219,6 +219,8 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
   let lastFrame: PaneFrame | null = null
   let lastState: PaneState = { active: false, url: '', mode: 'own' }
   let lastTabs: TabInfo[] = []
+  /** Delayed screencast restart after a session loss (cleared on teardown). */
+  let restartTimer: ReturnType<typeof setTimeout> | null = null
 
   const broadcast = (event: string, payload: PaneFrame | PaneState | TabInfo[]): void => {
     const line = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`
@@ -259,7 +261,6 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
     void session.send('Page.stopScreencast').catch(() => {})
     void session.detach().catch(() => {})
   }
-
   const startScreencast = async (): Promise<void> => {
     try {
       const page = await runtime.sharedPage()
@@ -285,6 +286,17 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
       session.on('disconnected', () => {
         if (cdp === session) cdp = null
         if (screencastPage === page) screencastPage = null
+        // Self-heal: a pane that stays connected would otherwise never see a
+        // new screencast (restarts only happen on fresh client connects).
+        if (clients.size > 0) {
+          lastState = { active: false, url: '', error: 'screencast lost — restarting', mode: runtime.currentMode() }
+          broadcast('state', lastState)
+          if (restartTimer !== null) clearTimeout(restartTimer)
+          restartTimer = setTimeout(() => {
+            restartTimer = null
+            void startScreencast()
+          }, 500)
+        }
       })
       await session.send('Page.enable')
       await session.send('Page.startScreencast', {
@@ -577,6 +589,8 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
     disposeForward()
     disposeReload()
     offTabsChanged()
+    if (restartTimer !== null) clearTimeout(restartTimer)
+    restartTimer = null
     stopScreencast()
     for (const res of clients) {
       try {
