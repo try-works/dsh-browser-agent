@@ -92,7 +92,8 @@ profile's `cordis.patch.yml`:
 | `headed` | `false` | Launch a **visible Chrome window** instead of headless. The window is the same shared page the pane shows — two views of one browser. Needs a desktop session. |
 | `pane` | `true` | Serve the browser pane in the Web GUI. Headless/TUI compositions have no web server, so the pane never mounts there regardless. |
 | `userDataDir` | `''` (temp profile) | Chrome profile directory. Empty = a fresh temporary profile per launch. Set an absolute path to persist cookies, logins, and storage across launches (note: session cookies without an expiry are still session-only). |
-| `connectUrl` | `''` (disabled) | CDP browser URL for **My Chrome** mode. When set, the pane's mode toggle can connect to a Chrome you launched with `chrome.exe --remote-debugging-port=9222`, adopting your real tabs, logins, and fingerprint — the mode that passes bot-protection walls (e.g. Cloudflare Turnstile). Launch flags are ignored in connect mode. |
+| `connectUrl` | `''` (disabled) | CDP browser URL for **My Chrome** mode. When set, the pane's mode toggle can connect to a Chrome you launched with `chrome.exe --remote-debugging-port=9222 --user-data-dir=<non-default dir>`, adopting its real tabs, logins, and fingerprint — the mode that passes bot-protection walls (e.g. Cloudflare Turnstile). Launch flags are ignored in connect mode. |
+| `stealth` | `false` | Stealth plugin mode: launch our own Chrome **without** `--enable-automation` (so `navigator.webdriver` is false), headed, `AutomationControlled` disabled, persistent profile. Much better odds against bot walls than plain puppeteer, though not your personal fingerprint — for the sure thing use My Chrome mode. |
 
 ## The browser tools
 
@@ -140,13 +141,18 @@ agent drives — live, at any time:
 
 - **Plugin** — the instance this plugin launches (headless by default, with
   the configured viewport/profile).
-- **My Chrome** — your real Chrome, connected over CDP. Launch Chrome with
-  debugging enabled (e.g. the desktop shortcut
-  `chrome.exe --remote-debugging-port=9222`), set `connectUrl`, and toggle to
-  My Chrome: the plugin adopts your real tabs, logins, and fingerprint — the
-  mode that passes bot-protection walls such as **Cloudflare Turnstile**.
-  Switching back only detaches; your Chrome and its tabs are never closed by
-  the plugin.
+- **My Chrome** — a Chrome you launched yourself with debugging enabled,
+  connected over CDP. Chrome only opens the debug port on a **non-default
+  profile**, so launch it with a dedicated profile directory (e.g. the desktop
+  shortcut: `chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\Users\you\.dsh\chrome-debug-profile`),
+  set `connectUrl`, and toggle to My Chrome. Log in once inside that Chrome —
+  logins persist there — and it runs alongside your normal Chrome. Because the
+  plugin never touches its identity (no automation flags, no UA/viewport
+  changes), bot-protection walls such as **Cloudflare Turnstile** see a real
+  session. Switching back only detaches; your Chrome and its tabs are never
+  closed by the plugin. (Profiles cannot be copied between directories:
+  Chrome's App-Bound Encryption drops cookies moved to a different profile
+  path — the dedicated profile is the one to log into.)
 
 The pane is a real two-way remote:
 

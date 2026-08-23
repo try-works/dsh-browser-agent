@@ -75,14 +75,26 @@ export interface Config {
   userDataDir?: string
   /**
    * CDP browser URL for "My Chrome" mode: when set, the pane's browser-mode
-   * toggle can CONNECT to a Chrome you launched yourself (start it with
-   * `chrome.exe --remote-debugging-port=9222`). The plugin then works inside
-   * your real browser — real fingerprint, logins, and tabs — which is what
-   * bot-protection walls (e.g. Cloudflare Turnstile) see as a real session.
-   * Launch flags (`headed`, `userDataDir`, viewport) are ignored in connect
-   * mode; your Chrome's own state decides everything.
+   * toggle can CONNECT to a Chrome you launched yourself. Chrome only opens
+   * the debug port on a NON-default profile, so launch it with
+   * `chrome.exe --remote-debugging-port=9222 --user-data-dir=<some dir>` —
+   * a dedicated profile (log in once; logins persist there). The instance
+   * runs alongside your normal Chrome, has no automation flags, and its real
+   * fingerprint is what bot-protection walls (e.g. Cloudflare Turnstile) see.
+   * Note: profiles cannot be copied between directories — Chrome's App-Bound
+   * Encryption drops cookies moved to a different profile path.
    */
   connectUrl?: string
+  /**
+   * Stealth plugin mode: launch our own Chrome **without** puppeteer's
+   * automation flags (`--enable-automation`), headed, with
+   * `AutomationControlled` disabled and the persistent profile — so
+   * `navigator.webdriver` is false and bot-protection walls (e.g. Cloudflare
+   * Turnstile) see a much more real session. Better odds than plain
+   * puppeteer, though not your personal fingerprint — for the sure thing use
+   * the "My Chrome" mode. Default: false (plain puppeteer launch).
+   */
+  stealth?: boolean
 }
 
 /** Schemastery config with defaults; cordis applies this before `apply`. */
@@ -99,6 +111,7 @@ export const Config: z<Config> = z.object({
   pane: z.boolean().default(DEFAULT_PANE),
   userDataDir: z.string().default(DEFAULT_USER_DATA_DIR),
   connectUrl: z.string().default(DEFAULT_CONNECT_URL),
+  stealth: z.boolean().default(false),
 })
 
 /** Resolved config after schemastery defaults are applied. */

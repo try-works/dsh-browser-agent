@@ -157,6 +157,8 @@ export class BrowserRuntime {
   private mode: BrowserMode = 'own'
   /** Whether WE launched the current browser (close vs disconnect on teardown). */
   private owned = false
+  /** The stealth-launch child process (killed as a teardown backstop). */
+  private stealthChild: import('node:child_process').ChildProcess | null = null
   /** Foreign page targets seen but not yet folded (blank ones wait for a URL). */
   private readonly foreignTargets = new Set<Target>()
   /** Tab-set listeners (the pane restarts its screencast on switches). */
@@ -218,6 +220,7 @@ export class BrowserRuntime {
 
   /** Launch our own Chrome instance (mode 'own'). */
   private async launchBrowser(): Promise<Browser> {
+    if (this.config.stealth) return this.launchStealthBrowser()
     const { launch } = await import('puppeteer-core')
     const cfg = this.config
     const headed = cfg.headed
@@ -253,13 +256,84 @@ export class BrowserRuntime {
     return browser
   }
 
+  /**
+   * Stealth launch (mode 'own' with `stealth: true`): spawn Chrome ourselves
+   * with hand-rolled arguments — NO `--enable-automation` (so
+   * `navigator.webdriver` stays false), headed, `AutomationControlled`
+   * disabled, persistent profile — then attach over CDP the same way "My
+   * Chrome" does. Chrome writes the ephemeral debug port to
+   * `DevToolsActivePort` in the profile directory; that file is how we find
+   * it with `--remote-debugging-port=0`.
+   */
+  private async launchStealthBrowser(): Promise<Browser> {
+    const { spawn } = await import('node:child_process')
+    const { connect } = await import('puppeteer-core')
+    const { existsSync, mkdirSync, readFileSync } = await import('node:fs')
+    const cfg = this.config
+    const profileDir = cfg.userDataDir !== ''
+      ? cfg.userDataDir
+      : join(homedir(), '.dsh', 'browser-stealth-profile')
+    mkdirSync(profileDir, { recursive: true })
+    const args = [
+      '--no-sandbox',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-blink-features=AutomationControlled',
+      `--window-size=${cfg.viewport.width},${cfg.viewport.height}`,
+      '--remote-debugging-port=0',
+      `--user-data-dir=${profileDir}`,
+      'about:blank',
+    ]
+    const child = spawn(cfg.chromePath, args, { stdio: 'ignore' })
+    this.stealthChild = child
+    child.on('exit', () => {
+      if (this.stealthChild === child) this.stealthChild = null
+    })
+    // Chrome writes `<port>\n<ws-path>` here once the debug server is up.
+    const portFile = join(profileDir, 'DevToolsActivePort')
+    let portLine = ''
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (existsSync(portFile)) {
+        const content = readFileSync(portFile, 'utf8').trim()
+        const lines = content.split(/\r?\n/)
+        if (lines[0] && lines[0] !== '') {
+          portLine = lines[0]
+          break
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    if (portLine === '') {
+      this.stealthChild = null
+      child.kill()
+      throw new Error('stealth launch failed: Chrome never wrote its DevToolsActivePort file')
+    }
+    const browser = await connect({ browserURL: `http://127.0.0.1:${portLine}` })
+    this.owned = true
+    this.wireBrowser(browser)
+    return browser
+  }
+
   /** Connect to the user's own Chrome over CDP (mode 'connect'). */
   private async connectBrowser(): Promise<Browser> {
     if (this.config.connectUrl === '') {
       throw new Error('connect mode needs a connectUrl — start Chrome with --remote-debugging-port=9222 and set it in the plugin config')
     }
     const { connect } = await import('puppeteer-core')
-    const browser = await connect({ browserURL: this.config.connectUrl })
+    let browser: Browser
+    try {
+      browser = await connect({ browserURL: this.config.connectUrl })
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(
+        `Could not connect to your Chrome at ${this.config.connectUrl}. `
+        + 'Launch it with the "Chrome (DSH Browser)" shortcut (remote debugging needs its own profile directory — Chrome ignores the flag on the default profile), '
+        + `then toggle again. (${detail})`,
+      )
+    }
     this.owned = false
     this.wireBrowser(browser)
     // Adopt the user's real tabs: read-only adoption, their sizes stay.
@@ -301,6 +375,13 @@ export class BrowserRuntime {
         if (this.owned) await browser.close()
         else browser.disconnect()
       } catch { /* best-effort teardown */ }
+    }
+    const child = this.stealthChild
+    this.stealthChild = null
+    if (child && child.exitCode === null) {
+      try {
+        child.kill()
+      } catch { /* already gone */ }
     }
     this.owned = false
     this.mode = mode
@@ -677,5 +758,14 @@ export class BrowserRuntime {
     } catch { /* ignore */ }
     this.browser = null
     this.owned = false
+    // Backstop for the stealth child: CDP close normally exits it gracefully;
+    // a stuck child must not outlive the plugin fiber.
+    const child = this.stealthChild
+    this.stealthChild = null
+    if (child && child.exitCode === null) {
+      try {
+        child.kill()
+      } catch { /* already gone */ }
+    }
   }
 }
