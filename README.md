@@ -19,8 +19,9 @@ module, and slot systems.
   the DSH Web GUI showing that same page in real time. You can watch the agent
   browse and take over yourself: click, drag, scroll, type, or use the address
   bar. Everything lands in the page through the Chrome DevTools Protocol.
-- **A `browser-search` skill** — bundled guidance (plus a full runbook) that
-  teaches agents how to find and read web sources through the tools.
+- **Four packaged skills** — bundled guidance (plus a search runbook) that
+  teaches agents how to find web sources, navigate, automate pages, and verify
+  renders through the tools.
 - **URL normalization** — tools and address bar accept URLs, hostnames,
   `localhost:port`, existing local file paths, or plain search text.
 
@@ -154,8 +155,8 @@ pane server:
   crash or disconnect the cached handles are cleared and the next call
   relaunches.
 - `browser_goto` / `browser_evaluate` / `browser_screenshot` register on the
-  host `tools` registry; the `browser-search` skill registers on `skills` with
-  the bundled `skills/browser-search/` directory as its resource base.
+  host `tools` registry; the four packaged skills register on `skills`, each
+  with its bundled `skills/<name>/` directory as its resource base.
 - The pane server registers the three routes above on the shared web server
   (`ctx.webServer`), only when one exists. Request bodies are parsed by
   schemastery schemas at the route boundary.
@@ -184,14 +185,19 @@ pane server:
 skill, tears down the pane routes and the screencast, releases held keys, and
 closes Chrome.
 
-## The bundled skill
+## The bundled skills
 
-`browser-search` teaches an agent how to run web searches through the browser
-tools and the built-in `web_search` tool, with route triage and a full runbook
-at `skills/browser-search/references/search-engine-access-guide.md`
-(search-engine captchas/403s, SearXNG fallback, Wayback Machine, site search,
-and API routes). Both ship inside the package and resolve relative to the
-skill's resource base.
+The bundle registers four packaged skills on `ctx.skills` (the dsh-plugin
+packaged-skill standard: each `skills/<name>/SKILL.md` ships in the package
+and registers with a directory `resourceBase`, so relative references resolve
+against the bundle's copy):
+
+| Skill | Teaches the agent |
+| --- | --- |
+| `browser-search` | Finding and reading web sources through the tools and `web_search`, with route triage and a full runbook (`references/search-engine-access-guide.md` — search-engine captchas/403s, SearXNG fallback, Wayback Machine, site search, and API routes). |
+| `browser-navigation` | Moving around the shared page: URL forms (URLs, hostnames, `localhost` ports, file paths, search text), reading the `browser_goto` summary, redirects/statuses/timeouts, and the single shared-page model. |
+| `browser-interaction` | DOM automation through `browser_evaluate`: reading state, clicking, typing, form filling, scrolling, waiting for async content, JSON-safe results, and batching reads into one evaluate. |
+| `browser-visual-check` | Verifying renders with `browser_screenshot` (viewport/full page, PNG/JPEG) and keeping the shared page presentable for the human watching the live pane. |
 
 ## Development
 

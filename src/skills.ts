@@ -1,12 +1,16 @@
 /**
- * The bundled browser-search skill registration.
+ * The bundled skill registrations for dsh-browser-agent.
  *
- * The skill body is the DSH-authored guide (skills/browser-search/SKILL.md) for
- * running web searches through the browser tools, plus the search-engine
- * access runbook it references (references/search-engine-access-guide.md). The
- * registration uses a directory `resourceBase` pointing at the bundled skill
- * directory so the SKILL.md's relative reference to
- * references/search-engine-access-guide.md resolves against the bundle's copy.
+ * Each skill lives in its own directory under `skills/<name>/SKILL.md` and
+ * registers with a directory `resourceBase` pointing at the bundled copy, so
+ * any relative references inside the SKILL.md resolve against the package's
+ * own files (the dsh-plugin packaged-skill standard, same shape as
+ * dsh-anti-slop).
+ *
+ * The skills cover the four agent-facing capabilities of the browser:
+ * `browser-search` (finding and reading web sources), `browser-navigation`
+ * (moving around the shared page), `browser-interaction` (DOM automation via
+ * evaluate), and `browser-visual-check` (screenshots and the live pane).
  *
  * @module dsh-browser-agent/src/skills
  */
@@ -18,25 +22,41 @@ import type {} from '@deepseek-ai/dsh-skill'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/** The bundled skill directory (this module lives at src/skills.ts). */
-export function skillDirectory(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), '..', 'skills/browser-search')
+/** The packaged skill names, one directory each under skills/. */
+const SKILL_NAMES = [
+  'browser-search',
+  'browser-navigation',
+  'browser-interaction',
+  'browser-visual-check',
+] as const
+
+/** Routing descriptions shown by skill discovery (match each SKILL.md frontmatter). */
+const SKILL_DESCRIPTIONS = {
+  'browser-search': 'Use when you need to find and read web sources through the browser tools (browser_goto / browser_evaluate / browser_screenshot) or the built-in web_search tool, especially when the search path fails — web_search errors, search engines return captcha / HTTP 403/429 / decoy results, or a page tears down a search-engine session. Covers route triage and a full runbook.',
+  'browser-navigation': 'Use when navigating the shared Chrome page with browser_goto — choosing URLs (full URLs, hostnames, localhost ports, file paths, or search text), reading the navigation summary, handling redirects/statuses/timeouts, and working within the single shared-page model.',
+  'browser-interaction': 'Use when interacting with a page through browser_evaluate — reading DOM state, clicking, typing, filling forms, scrolling, waiting for async content, and returning JSON-safe results, all on the shared page the agent and the user watch together.',
+  'browser-visual-check': 'Use when verifying how a page looks — capture the shared page with browser_screenshot (viewport or full page, PNG or JPEG), confirm renders and layouts after DOM changes, and keep the shared page presentable for the human watching the live pane.',
+} satisfies Record<(typeof SKILL_NAMES)[number], string>
+
+/** The bundled skill directory for one skill (this module lives in the bundle at lib/index.js). */
+export function skillDirectory(name: (typeof SKILL_NAMES)[number]): string {
+  return join(dirname(fileURLToPath(import.meta.url)), '..', `skills/${name}`)
 }
 
 /** The skill body: SKILL.md verbatim from the bundled skill directory. */
-export function skillBody(): string {
-  return readFileSync(join(skillDirectory(), 'SKILL.md'), 'utf8')
+export function skillBody(name: (typeof SKILL_NAMES)[number]): string {
+  return readFileSync(join(skillDirectory(name), 'SKILL.md'), 'utf8')
 }
 
 /**
- * Register the browser-search skill. Returns the cordis effect disposer.
+ * Register every packaged skill. Returns the cordis effect disposers.
  */
-export function registerBrowserSkill(ctx: Context): () => void {
-  return ctx.skills.register({
-    name: 'browser-search',
-    description: 'Use when you need to find and read web sources through the browser tools (browser_goto / browser_evaluate / browser_screenshot) or the built-in web_search tool, especially when the search path fails — web_search errors, search engines return captcha / HTTP 403/429 / decoy results, or a page tears down a search-engine session. Covers route triage and a full runbook.',
+export function registerBrowserSkills(ctx: Context): Array<() => void> {
+  return SKILL_NAMES.map(name => ctx.skills.register({
+    name,
+    description: SKILL_DESCRIPTIONS[name],
     source: 'bundled',
-    content: skillBody(),
-    resourceBase: { kind: 'directory', path: skillDirectory() },
-  })
+    content: skillBody(name),
+    resourceBase: { kind: 'directory', path: skillDirectory(name) },
+  }))
 }
