@@ -30,10 +30,10 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { CDPSession } from 'puppeteer-core'
+import type { CDPSession, Page } from 'puppeteer-core'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import z from '@deepseek-ai/schemastery'
-import type { BrowserRuntime, GotoResult } from './browser.ts'
+import type { BrowserRuntime, GotoResult, TabInfo } from './browser.ts'
 
 // Type-only: activates the cordis Context merge for `ctx.webServer`.
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -112,11 +112,21 @@ const PaneGotoSchema = z.object({
   url: z.string(),
 })
 
+/** Boundary schema for the pane tab-open route. */
+const PaneTabOpenSchema = z.object({
+  url: z.string().default(''),
+})
+
+/** Boundary schema for the pane tab-switch/tab-close routes. */
+const PaneTabIndexSchema = z.object({
+  index: z.number(),
+})
+
 /** JSON response bodies the pane routes answer with. */
 type PaneResponse =
   | { ok: true }
   | { ok: false; message: string }
-  | { ok: true; result: GotoResult | HistoryResult }
+  | { ok: true; result: GotoResult | HistoryResult | TabInfo[] }
 
 /** One history navigation outcome (back/forward/reload). */
 export interface HistoryResult {
@@ -185,6 +195,7 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
 
   const clients = new Set<ServerResponse>()
   let cdp: CDPSession | null = null
+  let screencastPage: Page | null = null
 
   // Double/triple click detection (reference model): same button within
   // 500ms and 4px increments the count, capped at 3.
@@ -197,12 +208,13 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
   // Keys currently held in the page; released when a pane client leaves.
   const heldKeys = new Map<string, string>() // code -> key
 
-  // Latest frame/state, replayed to clients that connect after the fact so a
-  // refreshed pane is instantly current instead of idle-until-next-change.
+  // Latest frame/state/tabs, replayed to clients that connect after the fact
+  // so a refreshed pane is instantly current instead of idle-until-next-change.
   let lastFrame: PaneFrame | null = null
   let lastState: PaneState = { active: false, url: '' }
+  let lastTabs: TabInfo[] = []
 
-  const broadcast = (event: string, payload: PaneFrame | PaneState): void => {
+  const broadcast = (event: string, payload: PaneFrame | PaneState | TabInfo[]): void => {
     const line = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`
     for (const res of clients) {
       try {
@@ -214,7 +226,7 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
   }
 
   /** Write one SSE event to a single client (connect-time replay). */
-  const send = (res: ServerResponse, event: string, payload: PaneFrame | PaneState): void => {
+  const send = (res: ServerResponse, event: string, payload: PaneFrame | PaneState | TabInfo[]): void => {
     try {
       res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`)
     } catch {
@@ -234,6 +246,7 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
   const stopScreencast = (): void => {
     const session = cdp
     cdp = null
+    screencastPage = null
     if (session === null) return
     releaseHeldKeys()
     void session.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {})
@@ -242,11 +255,13 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
   }
 
   const startScreencast = async (): Promise<void> => {
-    if (cdp !== null) return
     try {
       const page = await runtime.sharedPage()
+      if (cdp !== null && screencastPage === page) return
+      if (cdp !== null) stopScreencast()
       const session = await page.createCDPSession()
       cdp = session
+      screencastPage = page
       session.on('Page.screencastFrame', (frame) => {
         const { data, sessionId, metadata } = frame
         // CDP only keeps streaming while frames are acked.
@@ -263,6 +278,7 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
       })
       session.on('disconnected', () => {
         if (cdp === session) cdp = null
+        if (screencastPage === page) screencastPage = null
       })
       await session.send('Page.enable')
       await session.send('Page.startScreencast', {
@@ -279,11 +295,30 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
       broadcast('state', lastState)
     } catch (error) {
       cdp = null
+      screencastPage = null
       const message = error instanceof Error ? error.message : String(error)
       lastState = { active: false, url: '', error: message }
       broadcast('state', lastState)
     }
   }
+
+  // Follow the session's active tab: broadcast the tab set, and restart the
+  // screencast when the active page changed (the stream mirrors what the
+  // agent tools act on).
+  const offTabsChanged = runtime.onTabsChanged((tabs) => {
+    lastTabs = tabs
+    broadcast('tabs', tabs)
+    const activeRow = tabs.find(row => row.active)
+    if (activeRow !== undefined && screencastPage !== null) {
+      const activePage = runtime.sharedPage().then(page => page).catch(() => null)
+      void activePage.then((page) => {
+        if (page !== null && page !== screencastPage && clients.size > 0) {
+          lastFrame = null
+          void startScreencast()
+        }
+      })
+    }
+  })
 
   const nextClickCount = (button: string, x: number, y: number): number => {
     const now = Date.now()
@@ -382,11 +417,16 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
       })
       res.write('retry: 2000\n\n')
       clients.add(res)
-      // Replay the current state (and last frame) so a late or refreshed
-      // pane is instantly current.
+      // Replay the current state, tab set, and last frame so a late or
+      // refreshed pane is instantly current.
       send(res, 'state', lastState)
+      send(res, 'tabs', lastTabs)
       if (lastFrame !== null) send(res, 'frame', lastFrame)
       void startScreencast()
+      void runtime.tabs().then((tabs) => {
+        lastTabs = tabs
+        send(res, 'tabs', tabs)
+      }).catch(() => {})
       req.on('close', () => {
         clients.delete(res)
         if (clients.size === 0) {
@@ -429,6 +469,54 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
     },
   })
 
+  const disposeTabOpen = webServer.register({
+    kind: 'exact',
+    path: '/browser-pane/tab-open',
+    handler: async (req, res) => {
+      try {
+        const raw = await readBody(req)
+        const request = PaneTabOpenSchema(JSON.parse(raw))
+        const result = await runtime.openTab(request.url)
+        json(res, 200, { ok: true, result })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        json(res, 400, { ok: false, message })
+      }
+    },
+  })
+
+  const disposeTabSwitch = webServer.register({
+    kind: 'exact',
+    path: '/browser-pane/tab-switch',
+    handler: async (req, res) => {
+      try {
+        const raw = await readBody(req)
+        const request = PaneTabIndexSchema(JSON.parse(raw))
+        const result = await runtime.switchTab(request.index)
+        json(res, 200, { ok: true, result })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        json(res, 400, { ok: false, message })
+      }
+    },
+  })
+
+  const disposeTabClose = webServer.register({
+    kind: 'exact',
+    path: '/browser-pane/tab-close',
+    handler: async (req, res) => {
+      try {
+        const raw = await readBody(req)
+        const request = PaneTabIndexSchema(JSON.parse(raw))
+        const result = await runtime.closeTab(request.index)
+        json(res, 200, { ok: true, result })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        json(res, 400, { ok: false, message })
+      }
+    },
+  })
+
   const historyRoute = (path: string, action: () => Promise<HistoryResult>) => webServer.register({
     kind: 'exact',
     path,
@@ -451,9 +539,13 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
     disposeStream()
     disposeInput()
     disposeGoto()
+    disposeTabOpen()
+    disposeTabSwitch()
+    disposeTabClose()
     disposeBack()
     disposeForward()
     disposeReload()
+    offTabsChanged()
     stopScreencast()
     for (const res of clients) {
       try {

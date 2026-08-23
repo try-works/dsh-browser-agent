@@ -12,6 +12,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolCallView } from '@deepseek-ai/dsh-tools'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ResolvedConfig } from './config.ts'
 import type { BrowserRuntime } from './browser.ts'
 
@@ -368,6 +369,114 @@ export function registerBrowserTools(ctx: Context, config: ResolvedConfig, runti
     presentCall: (): ToolCallView => ({ card: 'generic', title: 'Read accessibility tree', kind: 'read', rawInput: 'a11y' }),
   })
   disposers.push(ctx.tools.register(a11y))
+
+  // ── tabs ───────────────────────────────────────────────────────────────────
+
+  const tabListSchema = {
+    type: 'array',
+    items: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        index: { type: 'number', required: true, description: 'Zero-based tab index for switch/close.' },
+        url: { type: 'string', required: true },
+        title: { type: 'string', required: true },
+        active: { type: 'boolean', required: true, description: 'Whether this is the tab the other browser tools act on.' },
+      },
+    },
+  } as const
+
+  const renderTabs = (value: Array<{ index: number; url: string; title: string; active: boolean }>): ContentBlock[] => {
+    const rows = value
+      .map(tab => `${tab.active ? '*' : ' '} [${tab.index}] ${tab.title || tab.url || 'New tab'}`)
+      .join('\n')
+    return [{ type: 'text', text: rows || '(no tabs)' }]
+  }
+
+  const tabs = defineTool({
+    name: 'browser_tabs',
+    description: 'List the browser tabs. The other browser tools always act on the ACTIVE tab; switch with browser_tab_switch.',
+    parameters: {},
+    timeoutMs: config.timeoutMs,
+    output: {
+      schema: tabListSchema,
+      render: (_args, value) => renderTabs(value),
+    },
+    async execute() {
+      return runtime.tabs()
+    },
+    presentCall: (): ToolCallView => ({ card: 'generic', title: 'List tabs', kind: 'read', rawInput: 'tabs' }),
+  })
+  disposers.push(ctx.tools.register(tabs))
+
+  const tabOpen = defineTool({
+    name: 'browser_tab_open',
+    description: 'Open a new tab and make it active. Pass a URL to navigate it (same URL forms as browser_goto); omit for a blank tab.',
+    parameters: {
+      url: { type: 'string', description: 'URL for the new tab; omit for a blank tab.' },
+    },
+    timeoutMs: config.timeoutMs,
+    output: {
+      schema: tabListSchema,
+      render: (_args, value) => renderTabs(value),
+    },
+    async execute(args) {
+      return runtime.openTab(args.url)
+    },
+    presentCall: (args): ToolCallView => ({
+      card: 'generic',
+      title: 'Open tab',
+      kind: 'fetch',
+      rawInput: args.url ?? 'blank',
+    }),
+  })
+  disposers.push(ctx.tools.register(tabOpen))
+
+  const tabSwitch = defineTool({
+    name: 'browser_tab_switch',
+    description: 'Switch the active tab by index (see browser_tabs). All other browser tools then act on that tab.',
+    parameters: {
+      index: { type: 'number', required: true, description: 'Zero-based tab index from browser_tabs.' },
+    },
+    timeoutMs: config.timeoutMs,
+    output: {
+      schema: tabListSchema,
+      render: (_args, value) => renderTabs(value),
+    },
+    async execute(args) {
+      return runtime.switchTab(args.index)
+    },
+    presentCall: (args): ToolCallView => ({
+      card: 'generic',
+      title: `Switch to tab ${args.index}`,
+      kind: 'execute',
+      rawInput: String(args.index),
+    }),
+  })
+  disposers.push(ctx.tools.register(tabSwitch))
+
+  const tabClose = defineTool({
+    name: 'browser_tab_close',
+    description: 'Close a tab by index (see browser_tabs). Closing the last tab leaves a fresh blank tab, so there is always an active page.',
+    parameters: {
+      index: { type: 'number', required: true, description: 'Zero-based tab index from browser_tabs.' },
+    },
+    timeoutMs: config.timeoutMs,
+    output: {
+      schema: tabListSchema,
+      render: (_args, value) => renderTabs(value),
+    },
+    async execute(args) {
+      return runtime.closeTab(args.index)
+    },
+    presentCall: (args): ToolCallView => ({
+      card: 'generic',
+      title: `Close tab ${args.index}`,
+      kind: 'execute',
+      rawInput: String(args.index),
+    }),
+  })
+  disposers.push(ctx.tools.register(tabClose))
 
   return disposers
 }

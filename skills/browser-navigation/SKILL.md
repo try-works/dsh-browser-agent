@@ -45,17 +45,18 @@ Useful consequences:
 
 ## Shared-page model
 
-- One page, one tab. **Popups and `target=_blank` links fold back into the
-  shared page** — the plugin closes the popup and navigates the shared page to
-  its URL instead. You never need to track multiple tabs.
-- History is available: `browser_back` / `browser_forward` go through the
-  shared page's own history (no full re-navigation needed), and
-  `browser_reload` refreshes. The pane header has matching buttons for the
-  human.
+- Tabs: the browser holds several tabs, one **active**; every tool acts on the
+  active tab. `browser_tabs` lists them, `browser_tab_open/switch/close` manage
+  them (see the `browser-multitab` skill).
+- **Popups and `target=_blank` links open as new tabs** — the new tab becomes
+  active and the page you were on is untouched.
+- History is per tab: `browser_back` / `browser_forward` go through the active
+  tab's own history (no full re-navigation needed), and `browser_reload`
+  refreshes. The pane header has matching buttons for the human.
 - The page persists between tool calls and between the agent and the human:
-  the user watches this exact page in the GUI pane. Leave it somewhere useful
+  the user watches the active tab in the GUI pane. Leave it somewhere useful
   at the end of a task (or at least navigated away from anything sensitive).
-- A browser crash clears the page; the next tool call relaunches Chrome fresh.
+- A browser crash clears the tabs; the next tool call relaunches Chrome fresh.
   When a profile directory is configured (`userDataDir`), cookies, logins,
   and storage persist across relaunches.
 

@@ -19,9 +19,9 @@ module, and slot systems.
   the DSH Web GUI showing that same page in real time. You can watch the agent
   browse and take over yourself: click, drag, scroll, type, or use the address
   bar. Everything lands in the page through the Chrome DevTools Protocol.
-- **Four packaged skills** — bundled guidance (plus a search runbook) that
-  teaches agents how to find web sources, navigate, automate pages, and verify
-  renders through the tools.
+- **Five packaged skills** — bundled guidance (plus a search runbook) that
+  teaches agents how to find web sources, navigate, automate pages, verify
+  renders, and manage tabs through the tools.
 - **URL normalization** — tools and address bar accept URLs, hostnames,
   `localhost:port`, existing local file paths, or plain search text.
 
@@ -104,8 +104,10 @@ profile's `cordis.patch.yml`:
 | `browser_type` | Type text into an input/textarea/select with real key events (React-safe); returns the field value. |
 | `browser_read` | Inner text of a selector (default: whole body), up to 6000 chars, with the match count. |
 | `browser_wait` | Wait until a selector appears (async content done), then return its text. |
-| `browser_back` / `browser_forward` / `browser_reload` | History navigation of the shared page. |
+| `browser_back` / `browser_forward` / `browser_reload` | History navigation of the active tab. |
 | `browser_a11y` | Compact accessibility tree (role/name/value, up to 400 nodes) — what screen readers consume. |
+| `browser_tabs` | List tabs (`index`, `url`, `title`, `active`); the other tools act on the active tab. |
+| `browser_tab_open` / `browser_tab_switch` / `browser_tab_close` | Manage tabs; popups and `target=_blank` links open as new tabs. |
 
 The page is shared and persistent: `browser_goto` to a site, `browser_evaluate`
 to interact with its DOM, `browser_screenshot` to see it — all the same tab.
@@ -160,20 +162,20 @@ One package, two halves, both mounted from a single composition row:
 **Host half (Node process)** — runs the browser, the tools, the skill, and the
 pane server:
 
-- A `BrowserRuntime` owns one lazily launched Chrome and one shared page. On a
-  crash or disconnect the cached handles are cleared and the next call
-  relaunches.
-- `browser_goto` / `browser_evaluate` / `browser_screenshot` register on the
-  host `tools` registry; the four packaged skills register on `skills`, each
-  with its bundled `skills/<name>/` directory as its resource base.
+- A `BrowserRuntime` owns one lazily launched Chrome and a **tab session**:
+  any number of tabs, one active. On a crash or disconnect the cached handles
+  are cleared and the next call relaunches.
+- All fifteen tools register on the host `tools` registry; the five packaged
+  skills register on `skills`, each with its bundled `skills/<name>/`
+  directory as its resource base.
 - The pane server registers the three routes above on the shared web server
   (`ctx.webServer`), only when one exists. Request bodies are parsed by
   schemastery schemas at the route boundary.
-- **Single-page containment**: popups and `target=_blank` links fold back into
-  the shared page instead of opening a second page, so the pane, the tools,
-  and any headed window never disagree about which page is live. Blank targets
-  are never closed (a page under creation is blank too); foreign targets are
-  folded once they carry a real URL.
+- **Tabs**: popups and `target=_blank` links open as **new tabs** (the
+  terminal-browser tabs-as-popups model) and the pane's tab strip mirrors the
+  session, so the pane, the tools, and any headed window never disagree about
+  which page is live. Blank targets are never closed (a page under creation
+  is blank too); foreign targets are adopted once they carry a real URL.
 - Background throttling is disabled so frames keep flowing when Chrome is
   occluded.
 
@@ -207,6 +209,7 @@ against the bundle's copy):
 | `browser-navigation` | Moving around the shared page: URL forms (URLs, hostnames, `localhost` ports, file paths, search text), reading the `browser_goto` summary, redirects/statuses/timeouts, and the single shared-page model. |
 | `browser-interaction` | DOM automation through `browser_evaluate`: reading state, clicking, typing, form filling, scrolling, waiting for async content, JSON-safe results, and batching reads into one evaluate. |
 | `browser-visual-check` | Verifying renders with `browser_screenshot` (viewport/full page, PNG/JPEG) and keeping the shared page presentable for the human watching the live pane. |
+| `browser-multitab` | Working with several pages at once: tab tools, which tab the other tools act on, popups-as-tabs, and tab discipline. |
 
 ## Development
 

@@ -56,6 +56,14 @@ interface PaneState {
   error?: string
 }
 
+/** One tab row (mirrors the host TabInfo payload). */
+interface PaneTab {
+  index: number
+  url: string
+  title: string
+  active: boolean
+}
+
 /** One input message the pane posts to the host route. */
 type PaneInputMessage =
   | { type: 'mouse-move' | 'mouse-down' | 'mouse-up'; x: number; y: number; button: 'left' | 'right' | 'middle' | 'none'; modifiers: number }
@@ -64,7 +72,7 @@ type PaneInputMessage =
   | { type: 'key-up'; key: string; code: string; modifiers: number }
 
 /** Every body the pane routes accept (mirrors the host schemas). */
-type PanePostBody = PaneInputMessage | { url: string } | { action: 'back' | 'forward' | 'reload' }
+type PanePostBody = PaneInputMessage | { url?: string } | { index: number } | { action: 'back' | 'forward' | 'reload' }
 
 /** Required services: the slot registry (client runtime). */
 export const inject = ['slots']
@@ -249,6 +257,16 @@ function NavButton(props: { label: string; title: string; onClick: () => void })
   }, props.label)
 }
 
+/** Short display label for one tab chip. */
+function tabLabel(tab: PaneTab): string {
+  if (tab.title && tab.title !== 'New Tab') return tab.title
+  if (tab.url && tab.url !== 'about:blank') {
+    const withoutScheme = tab.url.replace(/^https?:\/\//, '')
+    return withoutScheme.split('/')[0] ?? tab.url
+  }
+  return 'New tab'
+}
+
 /**
  * The docked pane component. Root-scope overlay entry: it receives no
  * session context and no owner props.
@@ -256,6 +274,7 @@ function NavButton(props: { label: string; title: string; onClick: () => void })
 function BrowserPane(): ReturnType<typeof h> {
   const [frame, setFrame] = useState<PaneFrame | null>(null)
   const [state, setState] = useState<PaneState>({ active: false, url: '' })
+  const [tabs, setTabs] = useState<PaneTab[]>([])
   const [collapsed, setCollapsed] = useState(false)
   const [addr, setAddr] = useState('')
   const [width, setWidth] = useState<number>(loadWidth)
@@ -286,6 +305,12 @@ function BrowserPane(): ReturnType<typeof h> {
       const payload = JSON.parse((event as MessageEvent<string>).data) as PaneState
       setState(payload)
       if (payload.url && !addrFocusRef.current) setAddr(payload.url)
+    })
+    source.addEventListener('tabs', (event) => {
+      // SAFETY: same package-owned channel; the host half only ever emits the
+      // TabInfo rows it produced for this pane.
+      const payload = JSON.parse((event as MessageEvent<string>).data) as PaneTab[]
+      setTabs(payload)
     })
     return () => { source.close() }
   }, [])
@@ -480,6 +505,79 @@ function BrowserPane(): ReturnType<typeof h> {
       }, 'Browser')), document.body)
   }
 
+  const stripStyle: CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '4px 8px',
+    background: C.header,
+    borderBottom: `1px solid ${C.panelBorder}`,
+    overflowX: 'auto',
+    flexShrink: 0,
+  }
+
+  const tabChipStyle = (active: boolean): CSSProperties => ({
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+    padding: '2px 6px 2px 8px',
+    borderRadius: 6,
+    background: active ? '#3a3d49' : 'transparent',
+    color: active ? C.text : C.dim,
+    fontSize: 11,
+    maxWidth: 180,
+    cursor: 'pointer',
+    userSelect: 'none',
+    flexShrink: 0,
+  })
+
+  const strip = h('div', { style: stripStyle, 'data-dsh-browser-tabs': true },
+    ...tabs.map(tab => h('div', {
+      key: tab.index,
+      style: tabChipStyle(tab.active),
+      title: tab.url,
+      onClick: () => { post('/browser-pane/tab-switch', { index: tab.index }) },
+    },
+      h('span', {
+        style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      }, tabLabel(tab)),
+      h('button', {
+        type: 'button',
+        title: 'Close tab',
+        'aria-label': 'Close tab',
+        onClick: (event: ReactMouseEvent<HTMLButtonElement>) => {
+          event.stopPropagation()
+          post('/browser-pane/tab-close', { index: tab.index })
+        },
+        style: {
+          background: 'transparent',
+          border: 'none',
+          color: C.dim,
+          fontSize: 12,
+          lineHeight: 1,
+          cursor: 'pointer',
+          padding: '0 2px',
+          flexShrink: 0,
+        },
+      }, '×'))),
+    h('button', {
+      type: 'button',
+      title: 'New tab',
+      'aria-label': 'New tab',
+      onClick: () => { post('/browser-pane/tab-open', { url: '' }) },
+      style: {
+        background: 'transparent',
+        color: C.dim,
+        border: '1px solid #3a3d49',
+        borderRadius: 6,
+        padding: '2px 7px',
+        fontSize: 12,
+        lineHeight: 1,
+        cursor: 'pointer',
+        flexShrink: 0,
+      },
+    }, '+'))
+
   const body = state.active && frame
     ? h('img', {
       ref: imgRef,
@@ -544,6 +642,7 @@ function BrowserPane(): ReturnType<typeof h> {
             flexShrink: 0,
           },
         }, 'Go'))),
+    strip,
     body), document.body)
 }
 

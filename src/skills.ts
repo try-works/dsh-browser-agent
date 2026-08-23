@@ -28,6 +28,7 @@ const SKILL_NAMES = [
   'browser-navigation',
   'browser-interaction',
   'browser-visual-check',
+  'browser-multitab',
 ] as const
 
 /** Routing descriptions shown by skill discovery (match each SKILL.md frontmatter). */
@@ -36,6 +37,7 @@ const SKILL_DESCRIPTIONS = {
   'browser-navigation': 'Use when navigating the shared Chrome page with browser_goto — choosing URLs (full URLs, hostnames, localhost ports, file paths, or search text), reading the navigation summary, handling redirects/statuses/timeouts, and working within the single shared-page model.',
   'browser-interaction': 'Use when interacting with a page through browser_evaluate — reading DOM state, clicking, typing, filling forms, scrolling, waiting for async content, and returning JSON-safe results, all on the shared page the agent and the user watch together.',
   'browser-visual-check': 'Use when verifying how a page looks — capture the shared page with browser_screenshot (viewport or full page, PNG or JPEG), confirm renders and layouts after DOM changes, and keep the shared page presentable for the human watching the live pane.',
+  'browser-multitab': 'Use when working with more than one page in the shared browser — opening, listing, switching, and closing tabs, understanding which tab the other browser tools act on, and how popups and target=_blank links become tabs.',
 } satisfies Record<(typeof SKILL_NAMES)[number], string>
 
 /** The bundled skill directory for one skill (this module lives in the bundle at lib/index.js). */

@@ -123,18 +123,61 @@ export interface ScreenshotResult {
   bytes: number
 }
 
+/** One tab row reported to the pane and the tabs tool. */
+export interface TabInfo {
+  index: number
+  url: string
+  title: string
+  active: boolean
+}
+
 /**
  * Headless browser runtime. One instance per plugin fiber; `close()` is the
  * disposer the plugin yields so Chrome is torn down on unload.
+ *
+ * Session model: any number of tabs, one active. The agent tools always act
+ * on the ACTIVE tab; the pane mirrors it and can switch tabs itself. Popups
+ * and `target=_blank` links open as new tabs (the terminal-browser
+ * tabs-as-popups model).
  */
 export class BrowserRuntime {
   private browser: Browser | null = null
-  private page: Page | null = null
-  private pageTarget: Target | null = null
+  private pages: Page[] = []
+  private targets: Target[] = []
+  private active = 0
   /** Foreign page targets seen but not yet folded (blank ones wait for a URL). */
   private readonly foreignTargets = new Set<Target>()
+  /** Tab-set listeners (the pane restarts its screencast on switches). */
+  private readonly tabListeners = new Set<(tabs: TabInfo[]) => void>()
 
   constructor(private readonly config: ResolvedConfig) {}
+
+  /** Subscribe to tab-set changes; returns the unsubscriber. */
+  onTabsChanged(listener: (tabs: TabInfo[]) => void): () => void {
+    this.tabListeners.add(listener)
+    return () => {
+      this.tabListeners.delete(listener)
+    }
+  }
+
+  /** Notify tab listeners with a fresh snapshot (errors isolated per listener). */
+  private notifyTabs(): void {
+    if (this.tabListeners.size === 0) return
+    void this.tabs().then((tabs) => {
+      for (const listener of this.tabListeners) {
+        try {
+          listener(tabs)
+        } catch { /* one bad subscriber must not starve the rest */ }
+      }
+    }).catch(() => {})
+  }
+
+  /** Apply the standard page setup to one tab page. */
+  private async setupPage(page: Page): Promise<void> {
+    page.setDefaultNavigationTimeout(this.config.navTimeoutMs)
+    page.setDefaultTimeout(this.config.scriptTimeoutMs)
+    await page.setViewport({ width: this.config.viewport.width, height: this.config.viewport.height })
+  }
 
   /** Launch the browser once; idempotent. */
   private async ensureBrowser(): Promise<Browser> {
@@ -171,14 +214,11 @@ export class BrowserRuntime {
     this.browser = await launch(launchOptions)
     this.browser.on('disconnected', () => {
       this.browser = null
-      this.page = null
-      this.pageTarget = null
+      this.pages = []
+      this.targets = []
+      this.active = 0
       this.foreignTargets.clear()
     })
-    // Single-page containment (the terminal-browser model): a page that
-    // opens a popup or a `target=_blank` link would otherwise leave the
-    // shared page behind while the action happened elsewhere. Fold every
-    // foreign page target back into the shared page instead.
     this.browser.on('targetcreated', (target) => {
       this.trackForeignTarget(target)
     })
@@ -188,14 +228,31 @@ export class BrowserRuntime {
     return this.browser
   }
 
-  /** Whether a target is the shared page's own target. */
+  /** Whether a target belongs to one of our tabs. */
   private isSharedTarget(target: Target): boolean {
-    if (this.pageTarget !== null && target === this.pageTarget) return true
-    if (this.page !== null && !this.page.isClosed() && target === this.page.target()) return true
-    return false
+    if (this.targets.includes(target)) return true
+    return this.pages.some(page => !page.isClosed() && page.target() === target)
   }
 
-  /** Record a foreign page target and try to fold it immediately. */
+  /** Drop closed tabs from the session arrays. */
+  private prune(): void {
+    let removed = false
+    for (let i = this.pages.length - 1; i >= 0; i--) {
+      if (this.pages[i].isClosed()) {
+        this.pages.splice(i, 1)
+        this.targets.splice(i, 1)
+        removed = true
+      }
+    }
+    if (this.pages.length === 0) {
+      this.active = 0
+      return
+    }
+    if (this.active >= this.pages.length) this.active = this.pages.length - 1
+    if (removed) this.notifyTabs()
+  }
+
+  /** Record a foreign page target and try to adopt it immediately. */
   private trackForeignTarget(target: Target): void {
     if (target.type() !== 'page') return
     if (this.isSharedTarget(target)) return
@@ -204,16 +261,15 @@ export class BrowserRuntime {
   }
 
   /**
-   * Fold a foreign page target back into the shared page. Blank targets are
-   * never closed — a `window.open` arrives as `about:blank` before its first
-   * navigation, and OUR own page passes through `targetcreated` the same way
-   * while `ensurePage` is still creating it. Closing on sight was what raced
-   * `newPage`'s own setup; a blank target waits for `targetchanged` instead.
+   * Adopt a foreign page target as a new tab. Blank targets are never closed
+   * — a `window.open` arrives as `about:blank` before its first navigation,
+   * and OUR own pages pass through `targetcreated` the same way while they
+   * are still being created. A blank target waits for `targetchanged`.
    */
   private async foldTarget(target: Target): Promise<void> {
     // Re-check identity: by the time a targetchanged fires for a target that
-    // was blank at creation, it may be our own page (pageTarget was recorded
-    // after the creation event ran).
+    // was blank at creation, it may be one of ours (recorded after the
+    // creation event ran).
     if (this.isSharedTarget(target)) {
       this.foreignTargets.delete(target)
       return
@@ -229,30 +285,104 @@ export class BrowserRuntime {
     this.foreignTargets.delete(target)
     const page = await target.page().catch(() => null)
     if (!page) return
-    void page.close().catch(() => {})
-    if (url.startsWith('chrome://') || url.startsWith('devtools://')) return
-    try {
-      await this.goto(url)
-    } catch { /* best-effort: the popup URL may refuse a fresh navigation */ }
+    if (url.startsWith('chrome://') || url.startsWith('devtools://')) {
+      void page.close().catch(() => {})
+      return
+    }
+    await this.setupPage(page)
+    this.pages.push(page)
+    this.targets.push(target)
+    this.active = this.pages.length - 1
+    this.notifyTabs()
   }
 
-  /** Lazily create (or reuse) the shared page. */
-  private async ensurePage(): Promise<Page> {
+  /** Create one tab page, append it, and activate it. */
+  private async createPage(): Promise<Page> {
     const browser = await this.ensureBrowser()
-    if (this.page && !this.page.isClosed()) return this.page
     const page = await browser.newPage()
-    page.setDefaultNavigationTimeout(this.config.navTimeoutMs)
-    page.setDefaultTimeout(this.config.scriptTimeoutMs)
-    await page.setViewport({ width: this.config.viewport.width, height: this.config.viewport.height })
-    this.page = page
-    this.pageTarget = page.target()
-    this.foreignTargets.delete(this.pageTarget)
+    await this.setupPage(page)
+    const target = page.target()
+    this.pages.push(page)
+    this.targets.push(target)
+    this.active = this.pages.length - 1
+    this.foreignTargets.delete(target)
+    this.notifyTabs()
     return page
   }
 
-  /** The shared page, launching Chrome on first use — for pane/stream consumers. */
+  /** Lazily create (or reuse) the ACTIVE tab's page. */
+  private async ensurePage(): Promise<Page> {
+    this.prune()
+    const current = this.pages[this.active]
+    if (current && !current.isClosed()) return current
+    return this.createPage()
+  }
+
+  /** The active tab's page, launching Chrome on first use — for pane/stream consumers. */
   async sharedPage(): Promise<Page> {
     return this.ensurePage()
+  }
+
+  /** The tab list (never empty: the last tab is never left closed). */
+  async tabs(): Promise<TabInfo[]> {
+    this.prune()
+    if (this.pages.length === 0) await this.createPage()
+    const rows: TabInfo[] = []
+    for (let index = 0; index < this.pages.length; index++) {
+      const page = this.pages[index]
+      rows.push({
+        index,
+        url: page.url(),
+        title: await page.title().catch(() => ''),
+        active: index === this.active,
+      })
+    }
+    return rows
+  }
+
+  /** Open a new tab (navigating when a URL is given) and activate it. */
+  async openTab(rawUrl?: string): Promise<TabInfo[]> {
+    await this.createPage()
+    if (rawUrl && rawUrl.trim() !== '') {
+      await this.goto(rawUrl)
+    }
+    return this.tabs()
+  }
+
+  /** Activate the tab at an index. */
+  async switchTab(index: number): Promise<TabInfo[]> {
+    this.prune()
+    if (!Number.isInteger(index) || index < 0 || index >= this.pages.length) {
+      throw new Error(`no tab at index ${index}`)
+    }
+    if (this.active !== index) {
+      this.active = index
+      this.notifyTabs()
+    }
+    return this.tabs()
+  }
+
+  /** Close the tab at an index (the last tab is replaced by a fresh blank one). */
+  async closeTab(index: number): Promise<TabInfo[]> {
+    this.prune()
+    if (!Number.isInteger(index) || index < 0 || index >= this.pages.length) {
+      throw new Error(`no tab at index ${index}`)
+    }
+    const page = this.pages[index]
+    this.pages.splice(index, 1)
+    this.targets.splice(index, 1)
+    void page.close().catch(() => {})
+    if (this.pages.length === 0) {
+      await this.createPage()
+      return this.tabs()
+    }
+    if (index === this.active) {
+      this.active = Math.min(index, this.pages.length - 1)
+    } else if (index < this.active) {
+      this.active -= 1
+    }
+    this.notifyTabs()
+    return this.tabs()
   }
 
   /** Navigate the shared page and summarize it. */
@@ -441,11 +571,15 @@ export class BrowserRuntime {
 
   /** Tear down the browser. Safe to call multiple times. */
   async close(): Promise<void> {
-    try {
-      if (this.page && !this.page.isClosed()) await this.page.close()
-    } catch { /* ignore */ }
-    this.page = null
-    this.pageTarget = null
+    for (const page of this.pages) {
+      try {
+        if (!page.isClosed()) await page.close()
+      } catch { /* ignore */ }
+    }
+    this.pages = []
+    this.targets = []
+    this.active = 0
+    this.foreignTargets.clear()
     try {
       if (this.browser) await this.browser.close()
     } catch { /* ignore */ }
