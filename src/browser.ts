@@ -131,6 +131,9 @@ export interface TabInfo {
   active: boolean
 }
 
+/** Which browser the session drives. */
+export type BrowserMode = 'own' | 'connect'
+
 /**
  * Headless browser runtime. One instance per plugin fiber; `close()` is the
  * disposer the plugin yields so Chrome is torn down on unload.
@@ -139,18 +142,32 @@ export interface TabInfo {
  * on the ACTIVE tab; the pane mirrors it and can switch tabs itself. Popups
  * and `target=_blank` links open as new tabs (the terminal-browser
  * tabs-as-popups model).
+ *
+ * Two modes: `own` launches a Chrome instance this plugin owns; `connect`
+ * attaches over CDP to a Chrome the USER launched (`--remote-debugging-port`),
+ * adopting its real tabs and profile — the mode that passes bot-protection
+ * walls. Mode switching is live; a connected browser is never closed by the
+ * plugin, only detached.
  */
 export class BrowserRuntime {
   private browser: Browser | null = null
   private pages: Page[] = []
   private targets: Target[] = []
   private active = 0
+  private mode: BrowserMode = 'own'
+  /** Whether WE launched the current browser (close vs disconnect on teardown). */
+  private owned = false
   /** Foreign page targets seen but not yet folded (blank ones wait for a URL). */
   private readonly foreignTargets = new Set<Target>()
   /** Tab-set listeners (the pane restarts its screencast on switches). */
   private readonly tabListeners = new Set<(tabs: TabInfo[]) => void>()
 
   constructor(private readonly config: ResolvedConfig) {}
+
+  /** The current browser mode. */
+  currentMode(): BrowserMode {
+    return this.mode
+  }
 
   /** Subscribe to tab-set changes; returns the unsubscriber. */
   onTabsChanged(listener: (tabs: TabInfo[]) => void): () => void {
@@ -172,16 +189,35 @@ export class BrowserRuntime {
     }).catch(() => {})
   }
 
-  /** Apply the standard page setup to one tab page. */
-  private async setupPage(page: Page): Promise<void> {
+  /** Apply timeouts (and the configured viewport for pages WE create). */
+  private async setupPage(page: Page, resize: boolean): Promise<void> {
     page.setDefaultNavigationTimeout(this.config.navTimeoutMs)
     page.setDefaultTimeout(this.config.scriptTimeoutMs)
-    await page.setViewport({ width: this.config.viewport.width, height: this.config.viewport.height })
+    if (resize) {
+      await page.setViewport({ width: this.config.viewport.width, height: this.config.viewport.height })
+    }
   }
 
-  /** Launch the browser once; idempotent. */
-  private async ensureBrowser(): Promise<Browser> {
-    if (this.browser && this.browser.connected) return this.browser
+  /** Wire the shared browser event handlers (launch and connect alike). */
+  private wireBrowser(browser: Browser): void {
+    browser.on('disconnected', () => {
+      this.browser = null
+      this.pages = []
+      this.targets = []
+      this.active = 0
+      this.owned = false
+      this.foreignTargets.clear()
+    })
+    browser.on('targetcreated', (target) => {
+      this.trackForeignTarget(target)
+    })
+    browser.on('targetchanged', (target) => {
+      if (this.foreignTargets.has(target)) void this.foldTarget(target)
+    })
+  }
+
+  /** Launch our own Chrome instance (mode 'own'). */
+  private async launchBrowser(): Promise<Browser> {
     const { launch } = await import('puppeteer-core')
     const cfg = this.config
     const headed = cfg.headed
@@ -211,21 +247,65 @@ export class BrowserRuntime {
       defaultViewport: { width: cfg.viewport.width, height: cfg.viewport.height },
     }
     if (cfg.userDataDir !== '') launchOptions.userDataDir = cfg.userDataDir
-    this.browser = await launch(launchOptions)
-    this.browser.on('disconnected', () => {
-      this.browser = null
-      this.pages = []
-      this.targets = []
-      this.active = 0
-      this.foreignTargets.clear()
-    })
-    this.browser.on('targetcreated', (target) => {
-      this.trackForeignTarget(target)
-    })
-    this.browser.on('targetchanged', (target) => {
-      if (this.foreignTargets.has(target)) void this.foldTarget(target)
-    })
+    const browser = await launch(launchOptions)
+    this.owned = true
+    this.wireBrowser(browser)
+    return browser
+  }
+
+  /** Connect to the user's own Chrome over CDP (mode 'connect'). */
+  private async connectBrowser(): Promise<Browser> {
+    if (this.config.connectUrl === '') {
+      throw new Error('connect mode needs a connectUrl — start Chrome with --remote-debugging-port=9222 and set it in the plugin config')
+    }
+    const { connect } = await import('puppeteer-core')
+    const browser = await connect({ browserURL: this.config.connectUrl })
+    this.owned = false
+    this.wireBrowser(browser)
+    // Adopt the user's real tabs: read-only adoption, their sizes stay.
+    this.pages = []
+    this.targets = []
+    this.active = 0
+    for (const page of await browser.pages()) {
+      await this.setupPage(page, false)
+      this.pages.push(page)
+      this.targets.push(page.target())
+    }
+    if (this.pages.length > 0) this.active = this.pages.length - 1
+    return browser
+  }
+
+  /** Ensure a browser exists for the current mode; idempotent. */
+  private async ensureBrowser(): Promise<Browser> {
+    if (this.browser && this.browser.connected) return this.browser
+    this.browser = this.mode === 'connect' ? await this.connectBrowser() : await this.launchBrowser()
+    this.notifyTabs()
     return this.browser
+  }
+
+  /**
+   * Switch the browser mode live. Switching away from `connect` only
+   * DETACHES the user's Chrome (their tabs and window are left alone);
+   * switching back reconnects and re-adopts their current tabs.
+   */
+  async switchMode(mode: BrowserMode): Promise<TabInfo[]> {
+    if (mode === this.mode && this.browser?.connected) return this.tabs()
+    const browser = this.browser
+    this.browser = null
+    this.pages = []
+    this.targets = []
+    this.active = 0
+    this.foreignTargets.clear()
+    if (browser) {
+      try {
+        if (this.owned) await browser.close()
+        else browser.disconnect()
+      } catch { /* best-effort teardown */ }
+    }
+    this.owned = false
+    this.mode = mode
+    await this.ensureBrowser()
+    return this.tabs()
   }
 
   /** Whether a target belongs to one of our tabs. */
@@ -289,7 +369,7 @@ export class BrowserRuntime {
       void page.close().catch(() => {})
       return
     }
-    await this.setupPage(page)
+    await this.setupPage(page, this.mode === 'own')
     this.pages.push(page)
     this.targets.push(target)
     this.active = this.pages.length - 1
@@ -300,7 +380,7 @@ export class BrowserRuntime {
   private async createPage(): Promise<Page> {
     const browser = await this.ensureBrowser()
     const page = await browser.newPage()
-    await this.setupPage(page)
+    await this.setupPage(page, this.mode === 'own')
     const target = page.target()
     this.pages.push(page)
     this.targets.push(target)
@@ -571,6 +651,18 @@ export class BrowserRuntime {
 
   /** Tear down the browser. Safe to call multiple times. */
   async close(): Promise<void> {
+    // A connected user browser is only DETACHED — their tabs and window stay.
+    if (this.browser && !this.owned) {
+      try {
+        this.browser.disconnect()
+      } catch { /* ignore */ }
+      this.browser = null
+      this.pages = []
+      this.targets = []
+      this.active = 0
+      this.foreignTargets.clear()
+      return
+    }
     for (const page of this.pages) {
       try {
         if (!page.isClosed()) await page.close()
@@ -584,5 +676,6 @@ export class BrowserRuntime {
       if (this.browser) await this.browser.close()
     } catch { /* ignore */ }
     this.browser = null
+    this.owned = false
   }
 }

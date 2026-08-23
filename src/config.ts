@@ -34,6 +34,9 @@ export const DEFAULT_PANE = true
 /** Default profile directory: empty = a fresh temporary profile per launch. */
 export const DEFAULT_USER_DATA_DIR = ''
 
+/** Default CDP connect URL: empty = connect mode unavailable until set. */
+export const DEFAULT_CONNECT_URL = ''
+
 /** Viewport shape accepted in config. */
 export interface Viewport {
   width: number
@@ -70,6 +73,16 @@ export interface Config {
    * logins, and local storage across launches (authenticated workflows).
    */
   userDataDir?: string
+  /**
+   * CDP browser URL for "My Chrome" mode: when set, the pane's browser-mode
+   * toggle can CONNECT to a Chrome you launched yourself (start it with
+   * `chrome.exe --remote-debugging-port=9222`). The plugin then works inside
+   * your real browser — real fingerprint, logins, and tabs — which is what
+   * bot-protection walls (e.g. Cloudflare Turnstile) see as a real session.
+   * Launch flags (`headed`, `userDataDir`, viewport) are ignored in connect
+   * mode; your Chrome's own state decides everything.
+   */
+  connectUrl?: string
 }
 
 /** Schemastery config with defaults; cordis applies this before `apply`. */
@@ -85,6 +98,7 @@ export const Config: z<Config> = z.object({
   headed: z.boolean().default(DEFAULT_HEADED),
   pane: z.boolean().default(DEFAULT_PANE),
   userDataDir: z.string().default(DEFAULT_USER_DATA_DIR),
+  connectUrl: z.string().default(DEFAULT_CONNECT_URL),
 })
 
 /** Resolved config after schemastery defaults are applied. */

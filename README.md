@@ -92,6 +92,7 @@ profile's `cordis.patch.yml`:
 | `headed` | `false` | Launch a **visible Chrome window** instead of headless. The window is the same shared page the pane shows — two views of one browser. Needs a desktop session. |
 | `pane` | `true` | Serve the browser pane in the Web GUI. Headless/TUI compositions have no web server, so the pane never mounts there regardless. |
 | `userDataDir` | `''` (temp profile) | Chrome profile directory. Empty = a fresh temporary profile per launch. Set an absolute path to persist cookies, logins, and storage across launches (note: session cookies without an expiry are still session-only). |
+| `connectUrl` | `''` (disabled) | CDP browser URL for **My Chrome** mode. When set, the pane's mode toggle can connect to a Chrome you launched with `chrome.exe --remote-debugging-port=9222`, adopting your real tabs, logins, and fingerprint — the mode that passes bot-protection walls (e.g. Cloudflare Turnstile). Launch flags are ignored in connect mode. |
 
 ## The browser tools
 
@@ -130,7 +131,22 @@ sidebar); collapsed, it shrinks to a **thin vertical rail** with a toggle.
 Its left edge is a **drag handle** — drag to resize (320 px to 85 % of the
 window), the width persists across reloads, and the whole GUI reflows around
 it. The header carries **back / forward / reload** buttons next to the address
-bar.
+bar, and the tab strip ends with a **browser-mode toggle**.
+
+### Browser modes
+
+The **Plugin / My Chrome** toggle in the tab strip switches which browser the
+agent drives — live, at any time:
+
+- **Plugin** — the instance this plugin launches (headless by default, with
+  the configured viewport/profile).
+- **My Chrome** — your real Chrome, connected over CDP. Launch Chrome with
+  debugging enabled (e.g. the desktop shortcut
+  `chrome.exe --remote-debugging-port=9222`), set `connectUrl`, and toggle to
+  My Chrome: the plugin adopts your real tabs, logins, and fingerprint — the
+  mode that passes bot-protection walls such as **Cloudflare Turnstile**.
+  Switching back only detaches; your Chrome and its tabs are never closed by
+  the plugin.
 
 The pane is a real two-way remote:
 
@@ -154,6 +170,7 @@ The pane is a real two-way remote:
 | `GET /browser-pane/stream` | SSE frame + state feed (`frame` / `state` events). |
 | `POST /browser-pane/input` | Synthetic input: `{type: mouse-move \| mouse-down \| mouse-up \| wheel \| key-down \| key-up, …}`. |
 | `POST /browser-pane/goto` | Navigate: `{url}`. |
+| `POST /browser-pane/mode` | Switch browser mode: `{mode: 'own' \| 'connect'}`. |
 
 ## How it works
 

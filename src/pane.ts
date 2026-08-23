@@ -61,6 +61,7 @@ export interface PaneState {
   active: boolean
   url: string
   error?: string
+  mode: 'own' | 'connect'
 }
 
 /** One input event the pane client sends (JSON-safe wire shape). */
@@ -120,6 +121,11 @@ const PaneTabOpenSchema = z.object({
 /** Boundary schema for the pane tab-switch/tab-close routes. */
 const PaneTabIndexSchema = z.object({
   index: z.number(),
+})
+
+/** Boundary schema for the browser-mode toggle route. */
+const PaneModeSchema = z.object({
+  mode: z.union([z.const('own' as const), z.const('connect' as const)]),
 })
 
 /** JSON response bodies the pane routes answer with. */
@@ -211,7 +217,7 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
   // Latest frame/state/tabs, replayed to clients that connect after the fact
   // so a refreshed pane is instantly current instead of idle-until-next-change.
   let lastFrame: PaneFrame | null = null
-  let lastState: PaneState = { active: false, url: '' }
+  let lastState: PaneState = { active: false, url: '', mode: 'own' }
   let lastTabs: TabInfo[] = []
 
   const broadcast = (event: string, payload: PaneFrame | PaneState | TabInfo[]): void => {
@@ -273,7 +279,7 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
           height: metadata.deviceHeight,
           url,
         }
-        lastState = { active: true, url }
+        lastState = { active: true, url, mode: runtime.currentMode() }
         broadcast('frame', lastFrame)
       })
       session.on('disconnected', () => {
@@ -291,13 +297,13 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
       // The pane owns the page while streaming: focus emulation keeps
       // focus-dependent page behavior (animations, :focus states) honest.
       void session.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
-      lastState = { active: true, url: page.url() }
+      lastState = { active: true, url: page.url(), mode: runtime.currentMode() }
       broadcast('state', lastState)
     } catch (error) {
       cdp = null
       screencastPage = null
       const message = error instanceof Error ? error.message : String(error)
-      lastState = { active: false, url: '', error: message }
+      lastState = { active: false, url: '', error: message, mode: runtime.currentMode() }
       broadcast('state', lastState)
     }
   }
@@ -517,6 +523,30 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
     },
   })
 
+  const disposeMode = webServer.register({
+    kind: 'exact',
+    path: '/browser-pane/mode',
+    handler: async (req, res) => {
+      try {
+        const raw = await readBody(req)
+        const request = PaneModeSchema(JSON.parse(raw))
+        const tabs = await runtime.switchMode(request.mode)
+        lastState = { active: true, url: tabs.find(row => row.active)?.url ?? '', mode: runtime.currentMode() }
+        lastTabs = tabs
+        lastFrame = null
+        broadcast('state', lastState)
+        broadcast('tabs', tabs)
+        void startScreencast()
+        json(res, 200, { ok: true, result: tabs })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        lastState = { active: false, url: '', error: message, mode: runtime.currentMode() }
+        broadcast('state', lastState)
+        json(res, 400, { ok: false, message })
+      }
+    },
+  })
+
   const historyRoute = (path: string, action: () => Promise<HistoryResult>) => webServer.register({
     kind: 'exact',
     path,
@@ -542,6 +572,7 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
     disposeTabOpen()
     disposeTabSwitch()
     disposeTabClose()
+    disposeMode()
     disposeBack()
     disposeForward()
     disposeReload()

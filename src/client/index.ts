@@ -54,6 +54,7 @@ interface PaneState {
   active: boolean
   url: string
   error?: string
+  mode: 'own' | 'connect'
 }
 
 /** One tab row (mirrors the host TabInfo payload). */
@@ -72,7 +73,7 @@ type PaneInputMessage =
   | { type: 'key-up'; key: string; code: string; modifiers: number }
 
 /** Every body the pane routes accept (mirrors the host schemas). */
-type PanePostBody = PaneInputMessage | { url?: string } | { index: number } | { action: 'back' | 'forward' | 'reload' }
+type PanePostBody = PaneInputMessage | { url?: string } | { index: number } | { action: 'back' | 'forward' | 'reload' } | { mode: 'own' | 'connect' }
 
 /** Required services: the slot registry (client runtime). */
 export const inject = ['slots']
@@ -257,6 +258,26 @@ function NavButton(props: { label: string; title: string; onClick: () => void })
   }, props.label)
 }
 
+/** One segment of the browser-mode toggle. */
+function ModeButton(props: { label: string; active: boolean; onClick: () => void }) {
+  return h('button', {
+    type: 'button',
+    onClick: props.onClick,
+    title: props.active ? 'Current browser' : 'Switch browser',
+    'aria-pressed': props.active,
+    style: {
+      background: props.active ? C.accent : 'transparent',
+      color: props.active ? '#fff' : C.dim,
+      border: 'none',
+      padding: '2px 8px',
+      fontSize: 11,
+      lineHeight: 1,
+      cursor: 'pointer',
+      flexShrink: 0,
+    },
+  }, props.label)
+}
+
 /** Short display label for one tab chip. */
 function tabLabel(tab: PaneTab): string {
   if (tab.title && tab.title !== 'New Tab') return tab.title
@@ -273,7 +294,7 @@ function tabLabel(tab: PaneTab): string {
  */
 function BrowserPane(): ReturnType<typeof h> {
   const [frame, setFrame] = useState<PaneFrame | null>(null)
-  const [state, setState] = useState<PaneState>({ active: false, url: '' })
+  const [state, setState] = useState<PaneState>({ active: false, url: '', mode: 'own' })
   const [tabs, setTabs] = useState<PaneTab[]>([])
   const [collapsed, setCollapsed] = useState(false)
   const [addr, setAddr] = useState('')
@@ -576,7 +597,21 @@ function BrowserPane(): ReturnType<typeof h> {
         cursor: 'pointer',
         flexShrink: 0,
       },
-    }, '+'))
+    }, '+'),
+    h('div', {
+      style: {
+        display: 'flex',
+        gap: 2,
+        marginLeft: 'auto',
+        border: '1px solid #3a3d49',
+        borderRadius: 6,
+        overflow: 'hidden',
+        flexShrink: 0,
+      },
+      title: 'Which browser the agent drives',
+    },
+      h(ModeButton, { label: 'Plugin', active: state.mode === 'own', onClick: () => { post('/browser-pane/mode', { mode: 'own' }) } }),
+      h(ModeButton, { label: 'My Chrome', active: state.mode === 'connect', onClick: () => { post('/browser-pane/mode', { mode: 'connect' }) } })))
 
   const body = state.active && frame
     ? h('img', {
