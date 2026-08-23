@@ -5,6 +5,25 @@ description: Use when interacting with a page through browser_evaluate — readi
 
 # Browser interaction (dsh-browser-agent)
 
+Structured tools plus `browser_evaluate` for everything they don't cover. All
+of them act on the shared page the agent and the user watch together.
+
+## Prefer the structured tools
+
+| Tool | Use |
+| --- | --- |
+| `browser_click(selector)` | Click the first match (scrolls it into view). Returns `ok` with the clicked tag/text; a missing selector returns `ok: false` instead of throwing. |
+| `browser_type(selector, text)` | Type into an input/textarea/select with **real key events** — works on React-controlled fields without the native-setter trick. Returns the field value after typing. |
+| `browser_read(selector?)` | Inner text of a selector (or the whole body), up to 6000 chars, with the match count. |
+| `browser_wait(selector, timeoutMs?)` | Wait until an element appears (async content done), then return its text. Default 10s. |
+| `browser_back` / `browser_forward` / `browser_reload` | History navigation of the shared page. |
+
+Use these whenever they fit — they are deterministic, validated, and cheaper
+for the model than composing raw JavaScript. Reach for `browser_evaluate` only
+when the task needs page-context logic the structured tools can't express.
+
+## `browser_evaluate` for the rest
+
 `browser_evaluate` runs a JavaScript expression **inside the page** (same
 context as the page's own scripts: `document`, `window`, `fetch` all available)
 and returns the JSON-serializable result. Use it to read state, drive the UI,

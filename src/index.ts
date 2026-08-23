@@ -46,6 +46,9 @@ export const inject = ['tools', 'skills']
  * unregisters the tools and skills.
  */
 export function apply(ctx: Context, config: Config): void {
+  // SAFETY: cordis validates the raw profile config against the exported
+  // `Config` schema and fills every default before `apply` runs, so the
+  // runtime object carries exactly the resolved fields the cast names.
   const resolved = config as ResolvedConfig
 
   ctx.effect(function* () {

@@ -91,6 +91,7 @@ profile's `cordis.patch.yml`:
 | `timeoutMs` | `60000` | Per-tool execution timeout. |
 | `headed` | `false` | Launch a **visible Chrome window** instead of headless. The window is the same shared page the pane shows — two views of one browser. Needs a desktop session. |
 | `pane` | `true` | Serve the browser pane in the Web GUI. Headless/TUI compositions have no web server, so the pane never mounts there regardless. |
+| `userDataDir` | `''` (temp profile) | Chrome profile directory. Empty = a fresh temporary profile per launch. Set an absolute path to persist cookies, logins, and storage across launches (note: session cookies without an expiry are still session-only). |
 
 ## The browser tools
 
@@ -99,6 +100,12 @@ profile's `cordis.patch.yml`:
 | `browser_goto` | Navigate the shared page and return `{url, finalUrl, status, title, text, links}` — up to 6000 chars of extracted heading/paragraph/list text and 25 links. |
 | `browser_evaluate` | Run a JavaScript expression in page context (`document`, `window`, DOM available) and return the JSON-serializable result. |
 | `browser_screenshot` | Capture the current page as a PNG/JPEG data URL (`{dataUrl, mime, bytes}`); `fullPage` for the whole page height. |
+| `browser_click` | Click the first element matching a CSS selector; returns the clicked tag/text or `ok: false` with a message. |
+| `browser_type` | Type text into an input/textarea/select with real key events (React-safe); returns the field value. |
+| `browser_read` | Inner text of a selector (default: whole body), up to 6000 chars, with the match count. |
+| `browser_wait` | Wait until a selector appears (async content done), then return its text. |
+| `browser_back` / `browser_forward` / `browser_reload` | History navigation of the shared page. |
+| `browser_a11y` | Compact accessibility tree (role/name/value, up to 400 nodes) — what screen readers consume. |
 
 The page is shared and persistent: `browser_goto` to a site, `browser_evaluate`
 to interact with its DOM, `browser_screenshot` to see it — all the same tab.
@@ -119,7 +126,9 @@ reference semantics):
 Expanded, the pane docks **full-height on the right edge** (like a mirrored
 sidebar); collapsed, it shrinks to a **thin vertical rail** with a toggle.
 Its left edge is a **drag handle** — drag to resize (320 px to 85 % of the
-window), and the width persists across reloads.
+window), the width persists across reloads, and the whole GUI reflows around
+it. The header carries **back / forward / reload** buttons next to the address
+bar.
 
 The pane is a real two-way remote:
 

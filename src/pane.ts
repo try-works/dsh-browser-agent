@@ -116,7 +116,14 @@ const PaneGotoSchema = z.object({
 type PaneResponse =
   | { ok: true }
   | { ok: false; message: string }
-  | { ok: true; result: GotoResult }
+  | { ok: true; result: GotoResult | HistoryResult }
+
+/** One history navigation outcome (back/forward/reload). */
+export interface HistoryResult {
+  ok: boolean
+  url: string
+  message?: string
+}
 
 /** Read a POST body as raw text with a hard size cap. */
 function readBody(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<string> {
@@ -422,10 +429,31 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
     },
   })
 
+  const historyRoute = (path: string, action: () => Promise<HistoryResult>) => webServer.register({
+    kind: 'exact',
+    path,
+    handler: async (_req, res) => {
+      try {
+        const result = await action()
+        json(res, 200, { ok: true, result })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        json(res, 400, { ok: false, message })
+      }
+    },
+  })
+
+  const disposeBack = historyRoute('/browser-pane/back', () => runtime.back())
+  const disposeForward = historyRoute('/browser-pane/forward', () => runtime.forward())
+  const disposeReload = historyRoute('/browser-pane/reload', () => runtime.reload())
+
   return () => {
     disposeStream()
     disposeInput()
     disposeGoto()
+    disposeBack()
+    disposeForward()
+    disposeReload()
     stopScreencast()
     for (const res of clients) {
       try {

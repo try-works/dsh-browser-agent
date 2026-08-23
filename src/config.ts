@@ -31,6 +31,9 @@ export const DEFAULT_HEADED = false
 /** Default browser pane: enabled wherever a web server hosts the GUI. */
 export const DEFAULT_PANE = true
 
+/** Default profile directory: empty = a fresh temporary profile per launch. */
+export const DEFAULT_USER_DATA_DIR = ''
+
 /** Viewport shape accepted in config. */
 export interface Viewport {
   width: number
@@ -61,6 +64,12 @@ export interface Config {
    * the composition hosts a web server. Default: true; set false to disable.
    */
   pane?: boolean
+  /**
+   * Chrome profile directory. Empty (default) = a fresh temporary profile per
+   * launch, so nothing persists. Set an absolute path to persist cookies,
+   * logins, and local storage across launches (authenticated workflows).
+   */
+  userDataDir?: string
 }
 
 /** Schemastery config with defaults; cordis applies this before `apply`. */
@@ -75,6 +84,7 @@ export const Config: z<Config> = z.object({
   timeoutMs: z.number().default(DEFAULT_TOOL_TIMEOUT_MS),
   headed: z.boolean().default(DEFAULT_HEADED),
   pane: z.boolean().default(DEFAULT_PANE),
+  userDataDir: z.string().default(DEFAULT_USER_DATA_DIR),
 })
 
 /** Resolved config after schemastery defaults are applied. */

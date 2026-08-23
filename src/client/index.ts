@@ -64,7 +64,7 @@ type PaneInputMessage =
   | { type: 'key-up'; key: string; code: string; modifiers: number }
 
 /** Every body the pane routes accept (mirrors the host schemas). */
-type PanePostBody = PaneInputMessage | { url: string }
+type PanePostBody = PaneInputMessage | { url: string } | { action: 'back' | 'forward' | 'reload' }
 
 /** Required services: the slot registry (client runtime). */
 export const inject = ['slots']
@@ -226,6 +226,27 @@ function ToggleButton(props: { expanded: boolean; onClick: () => void; vertical?
       flexShrink: 0,
     },
   }, props.expanded ? '»' : '«')
+}
+
+/** Small header navigation button (back/forward/reload). */
+function NavButton(props: { label: string; title: string; onClick: () => void }) {
+  return h('button', {
+    type: 'button',
+    onClick: props.onClick,
+    title: props.title,
+    'aria-label': props.title,
+    style: {
+      background: 'transparent',
+      color: C.dim,
+      border: '1px solid #3a3d49',
+      borderRadius: 6,
+      padding: '2px 7px',
+      fontSize: 12,
+      lineHeight: 1,
+      cursor: 'pointer',
+      flexShrink: 0,
+    },
+  }, props.label)
 }
 
 /**
@@ -491,6 +512,9 @@ function BrowserPane(): ReturnType<typeof h> {
       onPointerUp: onHandleUp,
     }),
     h('div', { style: headerStyle },
+      h(NavButton, { label: '‹', title: 'Go back', onClick: () => { post('/browser-pane/back', { action: 'back' }) } }),
+      h(NavButton, { label: '›', title: 'Go forward', onClick: () => { post('/browser-pane/forward', { action: 'forward' }) } }),
+      h(NavButton, { label: '⟳', title: 'Reload page', onClick: () => { post('/browser-pane/reload', { action: 'reload' }) } }),
       h(ToggleButton, { expanded: true, onClick: () => { setCollapsed(true) } }),
       h('span', { style: statusDot, title: state.active ? 'Browser connected' : 'Browser idle' }),
       h('span', { style: { color: C.text, fontSize: 12, fontWeight: 600, flexShrink: 0 } }, 'Browser'),

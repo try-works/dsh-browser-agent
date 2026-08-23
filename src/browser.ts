@@ -19,7 +19,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { Browser, Page, Target } from 'puppeteer-core'
+import type { Browser, LaunchOptions, Page, Target } from 'puppeteer-core'
 import type { JsonValue } from '@deepseek-ai/dsh-tools'
 import type { ResolvedConfig } from './config.ts'
 
@@ -159,14 +159,16 @@ export class BrowserRuntime {
     ]
     // GPU stays enabled in headed mode so the visible window renders normally.
     if (!headed) args.push('--disable-gpu')
-    this.browser = await launch({
+    const launchOptions: LaunchOptions = {
       executablePath: cfg.chromePath,
       headless: !headed,
       pipe: false,
       dumpio: false,
       args,
       defaultViewport: { width: cfg.viewport.width, height: cfg.viewport.height },
-    })
+    }
+    if (cfg.userDataDir !== '') launchOptions.userDataDir = cfg.userDataDir
+    this.browser = await launch(launchOptions)
     this.browser.on('disconnected', () => {
       this.browser = null
       this.page = null
@@ -314,6 +316,127 @@ export class BrowserRuntime {
     const mime = type === 'jpeg' ? 'image/jpeg' : 'image/png'
     const b64 = Buffer.from(buf).toString('base64')
     return { dataUrl: `data:${mime};base64,${b64}`, mime, bytes: buf.length }
+  }
+
+  /** Go back in the shared page's history (no-op result when empty). */
+  async back(): Promise<{ ok: boolean; url: string; message?: string }> {
+    const page = await this.ensurePage()
+    try {
+      await page.goBack({ waitUntil: 'domcontentloaded', timeout: this.config.navTimeoutMs })
+      return { ok: true, url: page.url() }
+    } catch (error) {
+      return { ok: false, url: page.url(), message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /** Go forward in the shared page's history (no-op result when empty). */
+  async forward(): Promise<{ ok: boolean; url: string; message?: string }> {
+    const page = await this.ensurePage()
+    try {
+      await page.goForward({ waitUntil: 'domcontentloaded', timeout: this.config.navTimeoutMs })
+      return { ok: true, url: page.url() }
+    } catch (error) {
+      return { ok: false, url: page.url(), message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /** Reload the shared page. */
+  async reload(): Promise<{ ok: boolean; url: string; message?: string }> {
+    const page = await this.ensurePage()
+    try {
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: this.config.navTimeoutMs })
+      return { ok: true, url: page.url() }
+    } catch (error) {
+      return { ok: false, url: page.url(), message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /** Click the first element matching a CSS selector. */
+  async click(selector: string): Promise<{ ok: boolean; tag: string; text: string; message?: string }> {
+    const page = await this.ensurePage()
+    const handle = await page.$(selector).catch(() => null)
+    if (!handle) {
+      return { ok: false, tag: '', text: '', message: `no element matching "${selector}"` }
+    }
+    try {
+      // Capture the element info BEFORE clicking: the click itself may
+      // navigate, which destroys the context any post-click read would need.
+      const info = await handle.evaluate((el) => ({
+        tag: el.tagName.toLowerCase(),
+        text: (el.textContent || '').trim().slice(0, 200),
+      }))
+      await handle.click()
+      return { ok: true, tag: info.tag, text: info.text }
+    } catch (error) {
+      return { ok: false, tag: '', text: '', message: error instanceof Error ? error.message : String(error) }
+    } finally {
+      await handle.dispose().catch(() => {})
+    }
+  }
+
+  /** Type text into the first element matching a CSS selector (real key events). */
+  async type(selector: string, text: string): Promise<{ ok: boolean; value: string; message?: string }> {
+    const page = await this.ensurePage()
+    try {
+      await page.type(selector, text, { delay: 0 })
+      const value = await page.$eval(selector, (el) => {
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+          return el.value
+        }
+        return (el.textContent || '').slice(0, 200)
+      })
+      return { ok: true, value: value.slice(0, 200) }
+    } catch (error) {
+      return { ok: false, value: '', message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /** Read the inner text of a selector (default: the whole body). */
+  async read(selector?: string): Promise<{ text: string; count: number }> {
+    const page = await this.ensurePage()
+    const target = selector && selector.trim() !== '' ? selector : 'body'
+    return page.evaluate((sel) => {
+      const nodes = Array.from(document.querySelectorAll(sel))
+      const text = nodes
+        .map(el => (el instanceof HTMLElement ? el.innerText : el.textContent || ''))
+        .join('\n')
+        .trim()
+        .slice(0, 6000)
+      return { text, count: nodes.length }
+    }, target)
+  }
+
+  /** Wait until a selector exists, then return its text. */
+  async waitFor(selector: string, timeoutMs: number): Promise<{ found: boolean; text: string }> {
+    const page = await this.ensurePage()
+    const handle = await page.waitForSelector(selector, { timeout: timeoutMs }).catch(() => null)
+    if (!handle) return { found: false, text: '' }
+    const text = await handle.evaluate(el => el.textContent || '').catch(() => '')
+    await handle.dispose().catch(() => {})
+    return { found: true, text: text.trim().slice(0, 2000) }
+  }
+
+  /**
+   * Compact accessibility tree of the page (role/name/value rows). The AX
+   * tree is what screen readers consume — far more stable for agents than
+   * raw DOM inspection.
+   */
+  async a11yTree(maxNodes = 400): Promise<Array<{ role: string; name: string; value: string }>> {
+    const page = await this.ensurePage()
+    const session = await page.createCDPSession()
+    try {
+      const { nodes } = await session.send('Accessibility.getFullAXTree')
+      return nodes
+        .filter(node => (node.role?.value ?? '') !== '' || (node.name?.value ?? '') !== '')
+        .map(node => ({
+          role: node.role?.value ?? '',
+          name: node.name?.value ?? '',
+          value: node.value?.value ?? '',
+        }))
+        .slice(0, maxNodes)
+    } finally {
+      await session.detach().catch(() => {})
+    }
   }
 
   /** Tear down the browser. Safe to call multiple times. */
