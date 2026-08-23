@@ -1,0 +1,16 @@
+dsh-browser-agent
+=================
+
+This package is a fork of:
+
+  terminal-browser — https://github.com/zenbu-labs/terminal-browser
+  Copyright (c) 2024 zenbu-labs
+  License: ISC
+
+The fork keeps the browser engine (headless Chromium via puppeteer-core: lazy
+launch, page navigation, page-to-text extraction, and link extraction) and
+replaces the React Ink terminal user interface with DeepSeek Harness tools
+(browser_goto / browser_evaluate / browser_screenshot). The stdio JSON-RPC
+worker and terminal shell were removed.
+
+See LICENSE for the full license text.

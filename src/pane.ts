@@ -1,0 +1,437 @@
+/**
+ * Browser pane host half: a live view of the shared Chrome page inside the
+ * DSH Web GUI.
+ *
+ * Mounts only when a `webServer` service exists (the Web surface). Three
+ * routes on that server:
+ *
+ * - `GET /browser-pane/stream` — SSE frame feed. Frames come from the Chrome
+ *   DevTools Protocol `Page.startScreencast` (JPEG on visual change only),
+ *   so the pane streams what the agent sees without polling screenshots.
+ *   An initial `state` event tells the pane whether the browser is live.
+ * - `POST /browser-pane/input` — synthetic input into the page (CDP
+ *   `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent`), which is what
+ *   makes the pane a two-way remote, not just a video feed.
+ * - `POST /browser-pane/goto` — navigate the shared page from the pane.
+ *
+ * Input fidelity follows the terminal-browser reference model: double/triple
+ * click counting, modifier bitmasks on mouse and key events, fractional wheel
+ * accumulation with line-mode detent scaling, held-key release when a client
+ * leaves, and focus emulation while the pane owns the page.
+ *
+ * The screencast session is owned by this module and follows the SSE clients:
+ * the first subscriber starts it, the last one stops it, and the plugin
+ * disposer tears it down.
+ *
+ * Wire discipline: every request body is parsed by a schemastery schema at
+ * the route boundary, so route logic branches on domain values only.
+ *
+ * @module dsh-browser-agent/src/pane
+ */
+
+import type { Context } from '@deepseek-ai/cordis'
+import type { CDPSession } from 'puppeteer-core'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import z from '@deepseek-ai/schemastery'
+import type { BrowserRuntime, GotoResult } from './browser.ts'
+
+// Type-only: activates the cordis Context merge for `ctx.webServer`.
+import type {} from '@deepseek-ai/dsh-host-webserver'
+
+/** Maximum accepted POST body size for pane input routes (bytes). */
+const MAX_BODY_BYTES = 64 * 1024
+
+/** Wheel detent step in pixels for line-mode (deltaMode 1) deltas. */
+const WHEEL_DETENT_PX = 120
+
+/** Screencast frame payload pushed to every pane client (JSON-safe). */
+export interface PaneFrame {
+  /** Base64 JPEG frame (no data-URL prefix; the pane adds it). */
+  data: string
+  /** Frame pixel width (device coordinates). */
+  width: number
+  /** Frame pixel height (device coordinates). */
+  height: number
+  /** Page URL at capture time. */
+  url: string
+}
+
+/** Browser liveness state pushed to pane clients (JSON-safe). */
+export interface PaneState {
+  active: boolean
+  url: string
+  error?: string
+}
+
+/** One input event the pane client sends (JSON-safe wire shape). */
+export interface PaneInputEvent {
+  type: 'mouse-move' | 'mouse-down' | 'mouse-up' | 'wheel' | 'key-down' | 'key-up'
+  x: number
+  y: number
+  button: 'left' | 'right' | 'middle' | 'none'
+  deltaX: number
+  deltaY: number
+  /** WheelEvent.deltaMode: 0 = pixels, 1 = lines, 2 = pages. */
+  deltaMode: number
+  key: string
+  code: string
+  text: string
+  /** CDP modifier bitmask: alt=1, ctrl=2, meta=4, shift=8. */
+  modifiers: number
+}
+
+/** Boundary schema for the pane input route. */
+const PaneInputSchema = z.object({
+  type: z.union([
+    z.const('mouse-move' as const),
+    z.const('mouse-down' as const),
+    z.const('mouse-up' as const),
+    z.const('wheel' as const),
+    z.const('key-down' as const),
+    z.const('key-up' as const),
+  ]),
+  x: z.number().default(0),
+  y: z.number().default(0),
+  button: z.union([
+    z.const('left' as const),
+    z.const('right' as const),
+    z.const('middle' as const),
+    z.const('none' as const),
+  ]).default('left' as const),
+  deltaX: z.number().default(0),
+  deltaY: z.number().default(0),
+  deltaMode: z.number().default(0),
+  key: z.string().default(''),
+  code: z.string().default(''),
+  text: z.string().default(''),
+  modifiers: z.number().default(0),
+})
+
+/** Boundary schema for the pane goto route. */
+const PaneGotoSchema = z.object({
+  url: z.string(),
+})
+
+/** JSON response bodies the pane routes answer with. */
+type PaneResponse =
+  | { ok: true }
+  | { ok: false; message: string }
+  | { ok: true; result: GotoResult }
+
+/** Read a POST body as raw text with a hard size cap. */
+function readBody(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    let finished = false
+    const fail = (error: Error): void => {
+      if (finished) return
+      finished = true
+      reject(error)
+    }
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > limit) {
+        fail(new Error('request body too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      if (finished) return
+      finished = true
+      resolve(Buffer.concat(chunks).toString('utf8'))
+    })
+    req.on('error', fail)
+  })
+}
+
+/** Answer one request with a JSON body. */
+function json(res: ServerResponse, status: number, value: PaneResponse): void {
+  if (res.writableEnded) return
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+  res.end(JSON.stringify(value))
+}
+
+/** Truncate a fractional delta toward zero, keeping the sign. */
+function wholeDelta(value: number): number {
+  return value < 0 ? Math.ceil(value) : Math.floor(value)
+}
+
+/** Last-click memory for double/triple click detection. */
+interface ClickState {
+  button: string
+  at: number
+  x: number
+  y: number
+  count: number
+}
+
+/**
+ * Register the pane routes on the shared web server. Returns a disposer, or
+ * undefined when no web server exists (headless/TUI compositions).
+ */
+export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() => void) | undefined {
+  const webServer = ctx.get('webServer')
+  if (!webServer) return undefined
+
+  const clients = new Set<ServerResponse>()
+  let cdp: CDPSession | null = null
+
+  // Double/triple click detection (reference model): same button within
+  // 500ms and 4px increments the count, capped at 3.
+  let clickState: ClickState = { button: 'none', at: 0, x: 0, y: 0, count: 0 }
+
+  // Fractional wheel deltas accumulate until they form whole pixels.
+  let wheelRemainderX = 0
+  let wheelRemainderY = 0
+
+  // Keys currently held in the page; released when a pane client leaves.
+  const heldKeys = new Map<string, string>() // code -> key
+
+  // Latest frame/state, replayed to clients that connect after the fact so a
+  // refreshed pane is instantly current instead of idle-until-next-change.
+  let lastFrame: PaneFrame | null = null
+  let lastState: PaneState = { active: false, url: '' }
+
+  const broadcast = (event: string, payload: PaneFrame | PaneState): void => {
+    const line = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`
+    for (const res of clients) {
+      try {
+        res.write(line)
+      } catch {
+        clients.delete(res)
+      }
+    }
+  }
+
+  /** Write one SSE event to a single client (connect-time replay). */
+  const send = (res: ServerResponse, event: string, payload: PaneFrame | PaneState): void => {
+    try {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`)
+    } catch {
+      clients.delete(res)
+    }
+  }
+
+  const releaseHeldKeys = (): void => {
+    const session = cdp
+    if (session === null || heldKeys.size === 0) return
+    for (const [code, key] of heldKeys) {
+      void session.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code }).catch(() => {})
+    }
+    heldKeys.clear()
+  }
+
+  const stopScreencast = (): void => {
+    const session = cdp
+    cdp = null
+    if (session === null) return
+    releaseHeldKeys()
+    void session.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {})
+    void session.send('Page.stopScreencast').catch(() => {})
+    void session.detach().catch(() => {})
+  }
+
+  const startScreencast = async (): Promise<void> => {
+    if (cdp !== null) return
+    try {
+      const page = await runtime.sharedPage()
+      const session = await page.createCDPSession()
+      cdp = session
+      session.on('Page.screencastFrame', (frame) => {
+        const { data, sessionId, metadata } = frame
+        // CDP only keeps streaming while frames are acked.
+        void session.send('Page.screencastFrameAck', { sessionId }).catch(() => {})
+        const url = page.url()
+        lastFrame = {
+          data,
+          width: metadata.deviceWidth,
+          height: metadata.deviceHeight,
+          url,
+        }
+        lastState = { active: true, url }
+        broadcast('frame', lastFrame)
+      })
+      session.on('disconnected', () => {
+        if (cdp === session) cdp = null
+      })
+      await session.send('Page.enable')
+      await session.send('Page.startScreencast', {
+        format: 'jpeg',
+        quality: 60,
+        maxWidth: 1600,
+        maxHeight: 1000,
+        everyNthFrame: 1,
+      })
+      // The pane owns the page while streaming: focus emulation keeps
+      // focus-dependent page behavior (animations, :focus states) honest.
+      void session.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
+      lastState = { active: true, url: page.url() }
+      broadcast('state', lastState)
+    } catch (error) {
+      cdp = null
+      const message = error instanceof Error ? error.message : String(error)
+      lastState = { active: false, url: '', error: message }
+      broadcast('state', lastState)
+    }
+  }
+
+  const nextClickCount = (button: string, x: number, y: number): number => {
+    const now = Date.now()
+    const close = Math.abs(x - clickState.x) <= 4 && Math.abs(y - clickState.y) <= 4
+    const count = clickState.button === button && now - clickState.at <= 500 && close
+      ? Math.min(clickState.count + 1, 3)
+      : 1
+    clickState = { button, at: now, x, y, count }
+    return count
+  }
+
+  const dispatchInput = async (event: PaneInputEvent): Promise<void> => {
+    const session = cdp
+    if (session === null) throw new Error('browser not ready — no page is open yet')
+    switch (event.type) {
+      case 'mouse-move':
+        await session.send('Input.dispatchMouseEvent', {
+          type: 'mouseMoved',
+          x: event.x,
+          y: event.y,
+          modifiers: event.modifiers,
+        })
+        return
+      case 'mouse-down': {
+        const clickCount = nextClickCount(event.button, event.x, event.y)
+        await session.send('Input.dispatchMouseEvent', {
+          type: 'mousePressed',
+          x: event.x,
+          y: event.y,
+          button: event.button,
+          clickCount,
+          modifiers: event.modifiers,
+        })
+        return
+      }
+      case 'mouse-up':
+        await session.send('Input.dispatchMouseEvent', {
+          type: 'mouseReleased',
+          x: event.x,
+          y: event.y,
+          button: event.button,
+          clickCount: Math.max(1, clickState.count),
+          modifiers: event.modifiers,
+        })
+        return
+      case 'wheel': {
+        const step = event.deltaMode === 1 ? WHEEL_DETENT_PX : event.deltaMode === 2 ? 600 : 1
+        wheelRemainderX += event.deltaX * step
+        wheelRemainderY += event.deltaY * step
+        const deltaX = wholeDelta(wheelRemainderX)
+        const deltaY = wholeDelta(wheelRemainderY)
+        wheelRemainderX -= deltaX
+        wheelRemainderY -= deltaY
+        if (deltaX === 0 && deltaY === 0) return
+        await session.send('Input.dispatchMouseEvent', {
+          type: 'mouseWheel',
+          x: event.x,
+          y: event.y,
+          deltaX,
+          deltaY,
+          modifiers: event.modifiers,
+        })
+        return
+      }
+      case 'key-down': {
+        if (!heldKeys.has(event.code) && event.code !== '') heldKeys.set(event.code, event.key)
+        await session.send('Input.dispatchKeyEvent', {
+          type: 'keyDown',
+          key: event.key,
+          code: event.code,
+          text: event.text === '' ? undefined : event.text,
+          modifiers: event.modifiers,
+        })
+        return
+      }
+      case 'key-up':
+        heldKeys.delete(event.code)
+        await session.send('Input.dispatchKeyEvent', {
+          type: 'keyUp',
+          key: event.key,
+          code: event.code,
+          modifiers: event.modifiers,
+        })
+        return
+    }
+  }
+
+  const disposeStream = webServer.register({
+    kind: 'exact',
+    path: '/browser-pane/stream',
+    handler: (req, res) => {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      })
+      res.write('retry: 2000\n\n')
+      clients.add(res)
+      // Replay the current state (and last frame) so a late or refreshed
+      // pane is instantly current.
+      send(res, 'state', lastState)
+      if (lastFrame !== null) send(res, 'frame', lastFrame)
+      void startScreencast()
+      req.on('close', () => {
+        clients.delete(res)
+        if (clients.size === 0) {
+          releaseHeldKeys()
+          stopScreencast()
+        }
+      })
+    },
+  })
+
+  const disposeInput = webServer.register({
+    kind: 'exact',
+    path: '/browser-pane/input',
+    handler: async (req, res) => {
+      try {
+        const raw = await readBody(req)
+        const event = PaneInputSchema(JSON.parse(raw))
+        await dispatchInput(event)
+        json(res, 200, { ok: true })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        json(res, 400, { ok: false, message })
+      }
+    },
+  })
+
+  const disposeGoto = webServer.register({
+    kind: 'exact',
+    path: '/browser-pane/goto',
+    handler: async (req, res) => {
+      try {
+        const raw = await readBody(req)
+        const request = PaneGotoSchema(JSON.parse(raw))
+        const result = await runtime.goto(request.url)
+        json(res, 200, { ok: true, result })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        json(res, 400, { ok: false, message })
+      }
+    },
+  })
+
+  return () => {
+    disposeStream()
+    disposeInput()
+    disposeGoto()
+    stopScreencast()
+    for (const res of clients) {
+      try {
+        res.end()
+      } catch { /* client already gone */ }
+    }
+    clients.clear()
+  }
+}

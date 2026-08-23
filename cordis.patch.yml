@@ -1,0 +1,14 @@
+# dsh-browser-agent bundle patch — the patch layer this package exports.
+#
+# Declared by `dsh.bundle.patch` in package.json. When installed into a profile
+# with `dsh plugin --profile <profile> add dsh-browser-agent`, dsh reconciles it
+# into `dsh.profile.bundles` and composes this layer over the profile.
+#
+# A single bare-name row mounts this plugin on the profile root. It publishes
+# NO service (it registers tools into the host-owned `tools` registry and keeps
+# its browser runtime module-private), so — like dsh-cloudflare — it needs no
+# `isolate` realm. The tools (`browser_goto` / `browser_evaluate` /
+# `browser_screenshot`) register globally for every agent the profile mounts.
+- insert:
+    - id: dsh-browser-agent
+      name: '@try-works/dsh-browser-agent'

@@ -1,0 +1,19 @@
+packages:
+  - .
+
+linkWorkspacePackages: true
+
+# The `file:` devDependencies above point into the DeepSeek Harness monorepo,
+# whose packages declare `workspace:^` runtime deps. Cosmokit and schemastery
+# are plain `dependencies` there (not peers), so pnpm cannot satisfy them from
+# the importer's devDeps — pin them to the harness vendors directly.
+overrides:
+  '@deepseek-ai/cosmokit': 'link:../../deepseek-harness/vendor/cosmokit'
+  '@deepseek-ai/schemastery': 'link:../../deepseek-harness/vendor/schemastery'
+
+peerDependencyRules:
+  allowedVersions:
+    typescript: '>=5 <7'
+
+allowBuilds:
+  esbuild: true

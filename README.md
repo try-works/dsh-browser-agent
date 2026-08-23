@@ -1,0 +1,211 @@
+# @try-works/dsh-browser-agent
+
+A **DeepSeek Harness (DSH)** bundle that gives agents a real Chrome browser,
+and gives you a live window onto it. One shared page, three agent tools, and a
+collapsible browser pane docked inside the DSH Web GUI that streams that page
+and takes real mouse/keyboard input.
+
+It is a fork of [zenbu-labs/terminal-browser](https://github.com/zenbu-labs/terminal-browser)
+with the terminal UI replaced by a DSH tool surface and a web pane — the same
+idea (pixels out, synthetic input in), built on the harness's own plugin,
+module, and slot systems.
+
+## What this plugin is and does
+
+- **Three tools for agents** — `browser_goto`, `browser_evaluate`,
+  `browser_screenshot` — all driving **one shared Chrome page** that persists
+  across calls, so an agent can navigate, read, interact, and capture.
+- **A live pane for humans** — a right-docked, collapsible, resizable panel in
+  the DSH Web GUI showing that same page in real time. You can watch the agent
+  browse and take over yourself: click, drag, scroll, type, or use the address
+  bar. Everything lands in the page through the Chrome DevTools Protocol.
+- **A `browser-search` skill** — bundled guidance (plus a full runbook) that
+  teaches agents how to find and read web sources through the tools.
+- **URL normalization** — tools and address bar accept URLs, hostnames,
+  `localhost:port`, existing local file paths, or plain search text.
+
+Chrome runs as a **separate OS process** launched by the plugin
+([puppeteer-core](https://www.npmjs.com/package/puppeteer-core)), so a browser
+crash can never take the harness down — the next call simply relaunches.
+
+## Install
+
+Prerequisites: a DSH deployment with a profile (the **Web** surface is needed
+for the pane; the tools work on any surface).
+
+```powershell
+# install from the npm registry into a profile (the DSH CLI forwards to pnpm
+# in the profile directory, then reconciles the profile's plugin bundles)
+dsh plugin --profile web add @try-works/dsh-browser-agent
+```
+
+The plugin's own bundle patch mounts the row automatically — no manual
+composition edit is needed. Then **restart `dsh web`** and **hard-refresh the
+GUI tab** (Ctrl+F5) so the client pane bundle is fetched. The three
+`browser_*` tools appear in the agent's tool set, and the pane docks on the
+right edge of the GUI.
+
+> **Fresh releases and the supply-chain policy** — DSH profiles enable pnpm's
+> `minimumReleaseAge` check. A version published less than 24 hours ago is
+> rejected unless it is listed in the profile's `pnpm-workspace.yaml`:
+>
+> ```yaml
+> minimumReleaseAgeExclude:
+>   - '@try-works/dsh-browser-agent@0.2.0||0.2.1'
+> ```
+>
+> One rule per package name — **multiple versions go in a single `||` union**
+> on the same line; separate lines for the same package shadow each other and
+> only the first applies.
+
+### Local development
+
+```powershell
+dsh plugin --profile web add link:D:/path/to/dsh-browser-agent
+```
+
+## Configuration
+
+All fields are optional (schemastery defaults fill them). Override via the
+profile's `cordis.patch.yml`:
+
+```yaml
+- id: dsh-browser-agent
+  config:
+    chromePath: 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+    viewport: { width: 1920, height: 1080 }
+    navTimeoutMs: 45000
+    scriptTimeoutMs: 20000
+    timeoutMs: 60000
+    headed: false
+    pane: true
+```
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `chromePath` | system Chrome on Windows | Absolute path to a Chrome/Chromium executable. |
+| `viewport` | `1920 × 1080` | Default viewport for new pages (and the headed window size). |
+| `navTimeoutMs` | `45000` | `page.goto` navigation timeout. |
+| `scriptTimeoutMs` | `20000` | `page.setDefaultTimeout` (script/evaluate timeout). |
+| `timeoutMs` | `60000` | Per-tool execution timeout. |
+| `headed` | `false` | Launch a **visible Chrome window** instead of headless. The window is the same shared page the pane shows — two views of one browser. Needs a desktop session. |
+| `pane` | `true` | Serve the browser pane in the Web GUI. Headless/TUI compositions have no web server, so the pane never mounts there regardless. |
+
+## The browser tools
+
+| Tool | What it does |
+| --- | --- |
+| `browser_goto` | Navigate the shared page and return `{url, finalUrl, status, title, text, links}` — up to 6000 chars of extracted heading/paragraph/list text and 25 links. |
+| `browser_evaluate` | Run a JavaScript expression in page context (`document`, `window`, DOM available) and return the JSON-serializable result. |
+| `browser_screenshot` | Capture the current page as a PNG/JPEG data URL (`{dataUrl, mime, bytes}`); `fullPage` for the whole page height. |
+
+The page is shared and persistent: `browser_goto` to a site, `browser_evaluate`
+to interact with its DOM, `browser_screenshot` to see it — all the same tab.
+
+### URL handling
+
+`browser_goto` and the pane's address bar accept (matching the terminal-browser
+reference semantics):
+
+- full URLs (`https://…`, `data:`, `mailto:`, `about:`, `view-source:`, …)
+- host-like input (`example.com/docs`, `localhost:5173` — `http://` for
+  localhost/127.0.0.1, `https://` otherwise)
+- existing absolute or `~`-expanded local paths (opened as `file://`)
+- anything else → a Google search
+
+## The browser pane
+
+Expanded, the pane docks **full-height on the right edge** (like a mirrored
+sidebar); collapsed, it shrinks to a **thin vertical rail** with a toggle.
+Its left edge is a **drag handle** — drag to resize (320 px to 85 % of the
+window), and the width persists across reloads.
+
+The pane is a real two-way remote:
+
+- **Frames out** — the pane subscribes to `GET /browser-pane/stream` (SSE).
+  The host half drives Chrome's `Page.startScreencast` (JPEG frames on visual
+  change only — no screenshot polling) and pushes each frame with the page
+  URL. The screencast follows its subscribers: the first client starts it, the
+  last one stops it, and late subscribers get the current state and last frame
+  replayed immediately.
+- **Input in** — pointer and keyboard events post to `/browser-pane/input` and
+  land in the page through the CDP Input domain (`Input.dispatchMouseEvent` /
+  `Input.dispatchKeyEvent`). Fidelity matches the terminal-browser reference:
+  double/triple-click counting, modifier bitmasks (Shift/Ctrl/Cmd/Alt on mouse
+  and keys), fractional wheel accumulation with line-mode detent scaling,
+  held-key release on focus loss, and focus emulation while the pane owns the
+  page.
+- **Address bar** — `POST /browser-pane/goto` navigates the shared page.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /browser-pane/stream` | SSE frame + state feed (`frame` / `state` events). |
+| `POST /browser-pane/input` | Synthetic input: `{type: mouse-move \| mouse-down \| mouse-up \| wheel \| key-down \| key-up, …}`. |
+| `POST /browser-pane/goto` | Navigate: `{url}`. |
+
+## How it works
+
+One package, two halves, both mounted from a single composition row:
+
+**Host half (Node process)** — runs the browser, the tools, the skill, and the
+pane server:
+
+- A `BrowserRuntime` owns one lazily launched Chrome and one shared page. On a
+  crash or disconnect the cached handles are cleared and the next call
+  relaunches.
+- `browser_goto` / `browser_evaluate` / `browser_screenshot` register on the
+  host `tools` registry; the `browser-search` skill registers on `skills` with
+  the bundled `skills/browser-search/` directory as its resource base.
+- The pane server registers the three routes above on the shared web server
+  (`ctx.webServer`), only when one exists. Request bodies are parsed by
+  schemastery schemas at the route boundary.
+- **Single-page containment**: popups and `target=_blank` links fold back into
+  the shared page instead of opening a second page, so the pane, the tools,
+  and any headed window never disagree about which page is live. Blank targets
+  are never closed (a page under creation is blank too); foreign targets are
+  folded once they carry a real URL.
+- Background throttling is disabled so frames keep flowing when Chrome is
+  occluded.
+
+**Client half (browser bundle)** — the pane UI:
+
+- `package.json` declares `dsh.client` (`platform: "web"`), and the built
+  bundle is exported at `exports["./client"]`. The DSH client-modules host
+  scans enabled entries for `dsh.client` packages, serves the bundle at
+  `/plugins/@try-works/dsh-browser-agent/client.js`, and the client kernel
+  adopts it as a cordis plugin — no extra composition row required.
+- The pane registers into the frame-wide `shell.overlay` slot declared by the
+  GUI layout, docked to the right edge. The bundle is written with
+  `React.createElement` (no JSX); `react` itself is a shell-seeded platform
+  module, so the bundle carries no framework bytes.
+
+**Lifecycle** — registration is wrapped in a `ctx.effect` generator (the
+`dsh-recursive-mode` pattern): unloading the plugin unregisters the tools and
+skill, tears down the pane routes and the screencast, releases held keys, and
+closes Chrome.
+
+## The bundled skill
+
+`browser-search` teaches an agent how to run web searches through the browser
+tools and the built-in `web_search` tool, with route triage and a full runbook
+at `skills/browser-search/references/search-engine-access-guide.md`
+(search-engine captchas/403s, SearXNG fallback, Wayback Machine, site search,
+and API routes). Both ship inside the package and resolve relative to the
+skill's resource base.
+
+## Development
+
+```powershell
+pnpm install     # links the type-only harness devDependencies
+pnpm build       # tsc declarations + tsdown: lib/index.js (host) and lib/client.js (client)
+pnpm typecheck   # tsc --noEmit
+```
+
+`prepublishOnly` runs `pnpm build`, so `npm publish` always ships fresh
+artifacts.
+
+## License
+
+ISC — see [LICENSE](./LICENSE). This package derives from
+[zenbu-labs/terminal-browser](https://github.com/zenbu-labs/terminal-browser)
+(ISC); see [NOTICE](./NOTICE).
