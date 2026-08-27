@@ -285,6 +285,23 @@ fixtures.
 `prepublishOnly` runs `pnpm build`, so `npm publish` always ships fresh
 artifacts.
 
+## Publishing
+
+```powershell
+pwsh scripts/publish.ps1 -CheckOnly   # verify the npm token without publishing
+pwsh scripts/publish.ps1              # build + publish the current version
+```
+
+The script reads a transient npm automation token (publish access to
+`@try-works`) from the token file, writes it to a local `.npmrc` for the
+duration of the command, and deletes it in `finally` — the token is never
+stored in this repo. After a successful publish, move the profile off the
+`link:` install:
+
+```powershell
+dsh plugin --profile web add @try-works/dsh-browser-agent
+```
+
 ## License
 
 ISC — see [LICENSE](./LICENSE). This package derives from
