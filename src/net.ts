@@ -86,13 +86,23 @@ export function decodeEntities(value: string): string {
     .replace(/&amp;/g, '&')
 }
 
+/**
+ * A tag open..close pair, where `>` only terminates the match outside of a
+ * quoted attribute value — MediaWiki `data-mw` attributes embed JSON whose
+ * strings contain `>` (and whole `{{template}}` bodies), which a naive
+ * `/<[^>]+>/` regex would cut mid-attribute and leak into the extracted text.
+ * Quoted runs are bounded so a malformed unclosed quote cannot swallow the
+ * rest of the document.
+ */
+const TAG_RE = /<(?:[^>'"]|"[^"]{0,20000}"|'[^']{0,20000}')*>/g
+
 /** Strip tags/scripts/styles, decode entities, collapse whitespace. */
 export function htmlToText(html: string): string {
   return decodeEntities(
     html
       .replace(/<script[\s\S]*?<\/script>/gi, ' ')
       .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' '),
+      .replace(TAG_RE, ' '),
   )
     .replace(/\s+/g, ' ')
     .trim()
@@ -185,6 +195,14 @@ export function buildBraveUrl(query: string, siteFilter?: string): string {
   const u = new URL('https://search.brave.com/search')
   u.searchParams.set('q', effectiveFilter ? `${cleanQuery} ${effectiveFilter}` : cleanQuery)
   u.searchParams.set('source', 'web')
+  return u.toString()
+}
+
+/** Mojeek search URL (site: operator joins the query, like Brave). */
+export function buildMojeekUrl(query: string, siteFilter?: string): string {
+  const { cleanQuery, effectiveFilter } = normalizeQuery(query, siteFilter)
+  const u = new URL('https://www.mojeek.com/search')
+  u.searchParams.set('q', effectiveFilter ? `${cleanQuery} ${effectiveFilter}` : cleanQuery)
   return u.toString()
 }
 
@@ -290,6 +308,34 @@ export function parseBraveHtml(html: string, maxResults: number): SearchResult[]
       domain = new URL(url).hostname.replace(/^www\./, '')
     } catch { /* invalid URL — leave empty */ }
     results.push({ title, snippet, domain, url })
+  }
+  return results
+}
+
+// ── Mojeek parser ───────────────────────────────────────────────────────────
+
+/** Parse Mojeek server-rendered HTML (`<!--rs-->`-delimited result rows). */
+export function parseMojeekHtml(html: string, maxResults: number): SearchResult[] {
+  // Mojeek emits one <!--rs--> marker per organic result, then <!--re-->.
+  const rows = html.split('<!--rs-->').slice(1)
+  const results: SearchResult[] = []
+  for (const row of rows) {
+    if (results.length >= maxResults) break
+    const titleMatch = /<a class="title"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(row)
+    if (!titleMatch) continue
+    const url = titleMatch[1] ?? ''
+    if (!url.startsWith('http')) continue
+    const snippetMatch = /<p class="s">([\s\S]*?)<\/p>/i.exec(row)
+    let domain = ''
+    try {
+      domain = new URL(url).hostname.replace(/^www\./, '')
+    } catch { /* invalid URL — leave empty */ }
+    results.push({
+      title: htmlToText(titleMatch[2] ?? ''),
+      snippet: htmlToText(snippetMatch?.[1] ?? '').slice(0, 500),
+      domain,
+      url,
+    })
   }
   return results
 }
@@ -441,7 +487,7 @@ export function parseRedditThreadJson(text: string, maxComments: number): Reddit
 
 // ── Engine chain + spacing ──────────────────────────────────────────────────
 
-export type SearchEngineName = 'ddg' | 'brave'
+export type SearchEngineName = 'ddg' | 'brave' | 'mojeek'
 
 /** One engine run in the chain. */
 export interface SearchOutcome {
@@ -488,13 +534,24 @@ async function fetchEngine(
     }
     return parsed
   }
-  const url = buildBraveUrl(query, siteFilter)
+  if (engine === 'brave') {
+    const url = buildBraveUrl(query, siteFilter)
+    const response = await fetchImpl(url, { headers: { 'User-Agent': BROWSER_USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9' } })
+    if (!response.ok) throw new Error(`Brave returned ${response.status}`)
+    const html = await response.text()
+    const results = parseBraveHtml(html, maxResults)
+    if (results.length === 0 && !html.includes('data-type="web"')) {
+      throw new Error('Brave returned no parseable organic results (possible bot check)')
+    }
+    return { results, instantAnswer: null }
+  }
+  const url = buildMojeekUrl(query, siteFilter)
   const response = await fetchImpl(url, { headers: { 'User-Agent': BROWSER_USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9' } })
-  if (!response.ok) throw new Error(`Brave returned ${response.status}`)
+  if (!response.ok) throw new Error(`Mojeek returned ${response.status}`)
   const html = await response.text()
-  const results = parseBraveHtml(html, maxResults)
-  if (results.length === 0 && !html.includes('data-type="web"')) {
-    throw new Error('Brave returned no parseable organic results (possible bot check)')
+  const results = parseMojeekHtml(html, maxResults)
+  if (results.length === 0 && !html.includes('results-standard')) {
+    throw new Error('Mojeek returned no parseable organic results (possible bot check)')
   }
   return { results, instantAnswer: null }
 }
@@ -556,13 +613,13 @@ export interface NetRuntimeConfig {
   fetchTimeoutMs: number
 }
 
-/** Parse an engine-list string like "ddg,brave" (unknowns fall back to ddg). */
+/** Parse an engine-list string like "ddg,brave,mojeek" (unknowns fall back to ddg). */
 export function parseSearchEngineList(value: string): SearchEngineName[] {
   const engines: SearchEngineName[] = []
   const seen = new Set<SearchEngineName>()
   for (const raw of value.split(',')) {
     const name = raw.trim().toLowerCase()
-    if ((name === 'ddg' || name === 'brave') && !seen.has(name)) {
+    if ((name === 'ddg' || name === 'brave' || name === 'mojeek') && !seen.has(name)) {
       seen.add(name)
       engines.push(name)
     }
@@ -642,7 +699,10 @@ export function createNetRuntime(
 
     /** Run the configured engine chain (auto) or one engine. */
     async search(query: string, siteFilter: string | undefined, maxResults: number, engine: SearchEngineName | 'auto'): Promise<SearchChainResult & { query: string }> {
-      if (siteFilter?.startsWith('site:')) await waitForSiteSearchSlot()
+      // Every search waits for a slot: HTML engines throttle on bursts of
+      // same-IP queries, not only on site:-filtered ones (DDG Lite observed
+      // throttling after 3-4 rapid calls in this very campaign).
+      await waitForSiteSearchSlot()
       const engines = engine === 'auto'
         ? config.searchEngines
         : [engine]

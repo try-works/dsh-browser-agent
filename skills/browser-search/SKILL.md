@@ -9,9 +9,9 @@ This skill is the operating guide for web access through the browser-agent tools
 tiers exist:
 
 - **Net tier (preferred):** no-key, plain-HTTP tools — `browser_search` (DuckDuckGo Lite →
-  Brave HTML chain), `browser_search_github` / `browser_search_wikipedia` (site-restricted
-  wrappers), `browser_fetch` (URL → readable text), `browser_reddit_search`, and
-  `browser_reddit_thread`. No Chrome, no API key, no JS rendering.
+  Brave HTML → Mojeek chain), `browser_search_github` / `browser_search_wikipedia`
+  (site-restricted wrappers), `browser_fetch` (URL → readable text), `browser_reddit_search`,
+  and `browser_reddit_thread`. No Chrome, no API key, no JS rendering.
 - **Browser tier:** one shared headless Chrome page — `browser_goto` navigates and summarizes,
   `browser_evaluate` runs JS in the page, `browser_screenshot` captures it. Use it for
   JS-rendered, walled, or interactive pages.
@@ -35,8 +35,8 @@ Try in this order and stop at the first that returns real results:
 
 1. **`browser_fetch`** when you already have a target URL and need its text.
 2. **`browser_search`** (or the github/wikipedia wrappers) when you need discovery. If the result
-   says the engines throttled or failed, retry once — the chain already fell back ddg→brave; then
-   degrade to the next tiers.
+   says the engines throttled or failed, retry once — the chain already fell back
+   ddg→brave→mojeek (Mojeek tolerates datacenter IPs best); then degrade to the next tiers.
 3. `web_search` built-in tool (retry once/twice; outages are often transient).
 4. **Browser tier:** `browser_goto` to a search engine or the target page itself — necessary for
    JS-rendered or walled content, and the reliable route when a datacenter IP is flagged by the

@@ -103,18 +103,19 @@ profile's `cordis.patch.yml`:
 | `userDataDir` | `''` (temp profile) | Chrome profile directory. Empty = a fresh temporary profile per launch. Set an absolute path to persist cookies, logins, and storage across launches (note: session cookies without an expiry are still session-only). |
 | `connectUrl` | `''` (disabled) | CDP browser URL for **My Chrome** mode. When set, the pane's mode toggle can connect to a Chrome you launched with `chrome.exe --remote-debugging-port=9222 --user-data-dir=<non-default dir>`, adopting its real tabs, logins, and fingerprint — the mode that passes bot-protection walls (e.g. Cloudflare Turnstile). Launch flags are ignored in connect mode. |
 | `stealth` | `false` | Stealth plugin mode: launch our own Chrome **without** `--enable-automation` (so `navigator.webdriver` is false), headed, `AutomationControlled` disabled, persistent profile. Much better odds against bot walls than plain puppeteer, though not your personal fingerprint — for the sure thing use My Chrome mode. |
-| `searchEngines` | `'ddg,brave'` | Engine chain for the net search tools, tried in order: `ddg` (DuckDuckGo Lite) and `brave` (Brave HTML). |
-| `siteSearchIntervalMs` | `3000` | Minimum delay between consecutive site-filtered net searches (rate-limit politeness). |
+| `searchEngines` | `'ddg,brave,mojeek'` | Engine chain for the net search tools, tried in order: `ddg` (DuckDuckGo Lite), `brave` (Brave HTML), and `mojeek` (Mojeek — most tolerant of datacenter IPs). |
+| `siteSearchIntervalMs` | `3000` | Minimum delay between consecutive net searches (rate-limit politeness; applies to every search, not only site-filtered). |
 | `fallbackOnEmpty` | `true` | Continue with the next engine when one returns no results. |
 | `fetchTimeoutMs` | `15000` | Per-request timeout for the net tools (fetch/search/reddit). |
 
 ## The net tools (no-key search & fetch)
 
 The net tier is a port of the pi-lynx engine chain (`browser_search` =
-DuckDuckGo Lite → Brave HTML with automatic fallback), plus a plain-HTTP page
-fetch and Reddit access — no Chrome, no API key, no JS rendering. These are
-the cheapest routes for research; the browser-search skill's triage puts them
-first and degrades to the browser tools when a datacenter IP gets throttled.
+DuckDuckGo Lite → Brave HTML → Mojeek with automatic fallback), plus a
+plain-HTTP page fetch and Reddit access — no Chrome, no API key, no JS
+rendering. These are the cheapest routes for research; the browser-search
+skill's triage puts them first and degrades to the browser tools when a
+datacenter IP gets throttled.
 
 | Tool | What it does |
 | --- | --- |

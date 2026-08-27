@@ -37,8 +37,8 @@ export const DEFAULT_USER_DATA_DIR = ''
 /** Default CDP connect URL: empty = connect mode unavailable until set. */
 export const DEFAULT_CONNECT_URL = ''
 
-/** Default search engine chain: DuckDuckGo Lite, then Brave HTML (pi-lynx port). */
-export const DEFAULT_SEARCH_ENGINES = 'ddg,brave'
+/** Default search engine chain: DDG Lite, Brave HTML, then Mojeek (pi-lynx port). */
+export const DEFAULT_SEARCH_ENGINES = 'ddg,brave,mojeek'
 
 /** Default delay between consecutive search-engine queries (ms) — politeness. */
 export const DEFAULT_SITE_SEARCH_INTERVAL_MS = 3_000
@@ -60,7 +60,9 @@ export interface Config {
   // --- Net (pi-lynx port) ---
   /**
    * Comma-separated engine chain for browser_search, tried in order:
-   * `ddg` (DuckDuckGo Lite HTML) and `brave` (Brave HTML). Default: `ddg,brave`.
+   * `ddg` (DuckDuckGo Lite HTML), `brave` (Brave HTML), and `mojeek`
+   * (Mojeek — the most tolerant of datacenter IPs). Default:
+   * `ddg,brave,mojeek`.
    */
   searchEngines?: string
   /**

@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 import {
   buildBraveUrl,
   buildDdgLiteUrl,
+  buildMojeekUrl,
   buildOldRedditUrl,
   buildRedditThreadJsonUrl,
   extractPageText,
@@ -23,6 +24,7 @@ import {
   normalizeQuery,
   parseBraveHtml,
   parseDdgLiteHtml,
+  parseMojeekHtml,
   parseOldRedditHtml,
   parseRedditSearchJson,
   parseRedditThreadJson,
@@ -48,6 +50,23 @@ test('htmlToText strips tags, scripts, styles and decodes entities', () => {
   assert.ok(text.includes('Hello & welcome'), 'entities decoded')
   assert.ok(text.includes("a b <tag> 'q'"), 'nbsp/lt/gt/apos decoded')
   assert.ok(!/\s{2,}/.test(text), 'whitespace collapsed')
+})
+
+test('htmlToText drops tags whose attribute values contain ">" (data-mw infobox JSON)', () => {
+  // MediaWiki data-mw attributes embed template JSON with ">" inside the
+  // quoted value; a naive tag regex terminates the tag at that ">" and the
+  // rest of the attribute leaks into extracted text.
+  const html = '<p>Lead text</p>'
+    + '<span class="mw-empty-elt" about="#mwt2" typeof="mw:Transclusion" '
+    + 'data-mw=\'{"parts":[{"template":{"wt":"Infobox technology standard","params":{"image":{"wt":"a>b {{leak template}}"}}}}]}\'>'
+    + 'Web standard and API</span>'
+    + '<p>After</p>'
+  const text = htmlToText(html)
+  assert.ok(!text.includes('{{leak'), 'attribute JSON after ">" does not leak into text')
+  assert.ok(!text.includes('Infobox'), 'attribute JSON does not leak into text')
+  assert.ok(text.includes('Lead text'), 'text before kept')
+  assert.ok(text.includes('Web standard and API'), 'element content kept')
+  assert.ok(text.includes('After'), 'text after kept')
 })
 
 test('extractPageText caps text and makes links opt-in', () => {
@@ -106,6 +125,40 @@ test('buildBraveUrl encodes query with site filter appended', () => {
     buildBraveUrl('rust', 'site:github.com'),
     'https://search.brave.com/search?q=rust+site%3Agithub.com&source=web',
   )
+})
+
+// ── Phase 4: Mojeek (datacenter-IP-friendly third engine) ───────────────────
+
+test('parseMojeekHtml extracts result rows from results-standard', () => {
+  const results = parseMojeekHtml(fixture('mojeek-search.html'), 4)
+  assert.ok(results.length >= 3, 'at least three results parsed')
+  for (const result of results) {
+    assert.ok(result.title.length > 0, 'title present')
+    assert.ok(result.url.startsWith('http'), 'real URL present')
+    assert.ok(result.domain.length > 0, 'domain derived from URL')
+  }
+  assert.ok(results.some(result => result.title.includes('Async')), 'expected topic found')
+})
+
+test('buildMojeekUrl encodes query with site filter appended', () => {
+  assert.equal(
+    buildMojeekUrl('rust', 'site:github.com'),
+    'https://www.mojeek.com/search?q=rust+site%3Agithub.com',
+  )
+})
+
+test('runSearchChain falls back to mojeek when ddg and brave fail', async () => {
+  const fetchImpl: NetFetch = async (input) => {
+    const url = String(input)
+    if (url.includes('mojeek.com')) {
+      return { ok: true, status: 200, text: async () => fixture('mojeek-search.html') }
+    }
+    throw new Error('blocked')
+  }
+  const outcome = await runSearchChain('rust', undefined, 3, ['ddg', 'brave', 'mojeek'], true, fetchImpl, async () => {})
+  assert.equal(outcome.engine, 'mojeek')
+  assert.deepEqual(outcome.attempted, ['ddg', 'brave', 'mojeek'])
+  assert.ok(outcome.results.length >= 1)
 })
 
 // ── Phase 3: Reddit ─────────────────────────────────────────────────────────

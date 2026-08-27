@@ -16,7 +16,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolCallView } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ResolvedConfig } from './config.ts'
-import { createNetRuntime, parseSearchEngineList } from './net.ts'
+import { createNetRuntime, normalizeQuery, parseSearchEngineList } from './net.ts'
 import type { NetFetch } from './net.ts'
 
 /** The live net tier produced by {@link createNetRuntime}. */
@@ -131,11 +131,30 @@ function renderRedditThread(value: {
 }
 
 /**
- * Wrap the chain error with the degradation path the browser-search skill
- * prescribes, so the model can route around a wall without being told again.
+ * Wrap a search-chain error with the degradation path the browser-search
+ * skill prescribes, so the model can route around a wall without being told
+ * again.
  */
-function fail(message: string): Error {
+function failSearch(message: string): Error {
   return new Error(`${message} — the search engines may be throttling this IP; retry once, then degrade to the browser tools (browser_goto to a search engine, or browser_search fallbacks).`)
+}
+
+/**
+ * A page fetch failed at the network level (DNS/TLS/reset/timeout) — not an
+ * engine wall; the page itself may be unreachable from this network or need
+ * a real browser (JS rendering, bot walls, cookies).
+ */
+function failFetch(message: string): Error {
+  return new Error(`${message} — the page did not respond over plain HTTP (network-level failure); retry once, then use browser_goto in the shared browser for JS-rendered or walled pages.`)
+}
+
+/**
+ * Reddit blocks datacenter IPs network-wide (403 on both old.reddit and the
+ * JSON API); the degradation path goes through the shared browser, where
+ * stealth / My Chrome mode has a realistic fingerprint.
+ */
+function failReddit(message: string): Error {
+  return new Error(`${message} — Reddit commonly 403s datacenter IPs; retry once, then use the shared browser (browser_goto to www.reddit.com or old.reddit.com) where stealth / My Chrome mode may pass.`)
 }
 
 /** Register the six net tools; returns their disposers. */
@@ -197,7 +216,7 @@ export function registerNetTools(ctx: Context, config: ResolvedConfig, net: NetR
         })
         return { url: args.url, ...result }
       } catch (error) {
-        throw fail(error instanceof Error ? error.message : String(error))
+        throw failFetch(error instanceof Error ? error.message : String(error))
       }
     },
     presentCall: (args): ToolCallView => ({
@@ -213,14 +232,14 @@ export function registerNetTools(ctx: Context, config: ResolvedConfig, net: NetR
 
   const search = defineTool({
     name: 'browser_search',
-    description: 'Search the web over plain HTTP (no API key): DuckDuckGo Lite first, Brave HTML as fallback. '
+    description: 'Search the web over plain HTTP (no API key): DuckDuckGo Lite first, Brave HTML, then Mojeek as fallbacks. '
       + 'Returns ranked results with title, snippet, domain, and URL, plus an instant answer when the engine has one. '
       + 'Use this before loading the shared browser for research; if the engines throttle or return captcha, retry once, then use browser_goto on a search engine. '
       + 'Pass site: "github" or "wikipedia" to search only those sites, or a domain like "stackoverflow.com".',
     parameters: {
       query: { type: 'string', required: true, description: 'Search query (plain words, quotes, or site: filters).' },
       site: { type: 'string', description: 'Restrict to a site: "github", "wikipedia", or a bare domain like "docs.deepseek.com".' },
-      engine: { type: 'string', enum: ['auto', 'ddg', 'brave'], description: 'Which engine: "auto" uses the configured chain (default), or force "ddg"/"brave".' },
+      engine: { type: 'string', enum: ['auto', 'ddg', 'brave', 'mojeek'], description: 'Which engine: "auto" uses the configured chain (default), or force "ddg"/"brave"/"mojeek".' },
       maxResults: { type: 'number', description: 'Maximum results to return. Default: 8, max 15.' },
     },
     timeoutMs: toolTimeoutMs,
@@ -242,8 +261,12 @@ export function registerNetTools(ctx: Context, config: ResolvedConfig, net: NetR
     async execute(args) {
       try {
         const site = resolveSiteFilter(args.site)
+        // Expand !gh/!w bangs BEFORE handing the filter to the runtime so its
+        // politeness spacing sees the resulting site: filter (an explicit
+        // site: argument always wins over a bang, matching the engine URLs).
+        const { cleanQuery, effectiveFilter } = normalizeQuery(args.query, site)
         const maxResults = clampResults(args.maxResults ?? 8)
-        const outcome = await net.search(args.query, site, maxResults, args.engine ?? 'auto')
+        const outcome = await net.search(cleanQuery, effectiveFilter, maxResults, args.engine ?? 'auto')
         return {
           query: outcome.query,
           engine: outcome.engine,
@@ -253,7 +276,7 @@ export function registerNetTools(ctx: Context, config: ResolvedConfig, net: NetR
           results: outcome.results,
         }
       } catch (error) {
-        throw fail(error instanceof Error ? error.message : String(error))
+        throw failSearch(error instanceof Error ? error.message : String(error))
       }
     },
     presentCall: (args): ToolCallView => ({
@@ -302,7 +325,7 @@ export function registerNetTools(ctx: Context, config: ResolvedConfig, net: NetR
           results: outcome.results,
         }
       } catch (error) {
-        throw fail(error instanceof Error ? error.message : String(error))
+        throw failSearch(error instanceof Error ? error.message : String(error))
       }
     },
     presentCall: (args): ToolCallView => ({
@@ -349,7 +372,7 @@ export function registerNetTools(ctx: Context, config: ResolvedConfig, net: NetR
           results: outcome.results,
         }
       } catch (error) {
-        throw fail(error instanceof Error ? error.message : String(error))
+        throw failSearch(error instanceof Error ? error.message : String(error))
       }
     },
     presentCall: (args): ToolCallView => ({
@@ -389,7 +412,7 @@ export function registerNetTools(ctx: Context, config: ResolvedConfig, net: NetR
         const outcome = await net.redditSearch(args.query, args.subreddit, clampResults(args.maxResults ?? 10))
         return { query: args.query.trim(), source: outcome.source, results: outcome.results }
       } catch (error) {
-        throw fail(error instanceof Error ? error.message : String(error))
+        throw failReddit(error instanceof Error ? error.message : String(error))
       }
     },
     presentCall: (args): ToolCallView => ({
@@ -443,7 +466,7 @@ export function registerNetTools(ctx: Context, config: ResolvedConfig, net: NetR
       try {
         return await net.redditThread(args.url, Math.max(1, Math.min(args.maxComments ?? 10, 50)))
       } catch (error) {
-        throw fail(error instanceof Error ? error.message : String(error))
+        throw failReddit(error instanceof Error ? error.message : String(error))
       }
     },
     presentCall: (args): ToolCallView => ({
