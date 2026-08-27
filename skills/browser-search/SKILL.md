@@ -53,9 +53,9 @@ variables tell you about the sandbox.
 
 ## Read the full runbook
 
-Load the complete guide — mainstream-engine status and tested workarounds, SearXNG instance
-discovery/probing, per-engine rendering approach, non-search-engine routes, official APIs, the
-decision checklist, and caveats — from:
+Load the complete guide — net-engine status and tested workarounds (DDG burst throttle, Brave
+429s, Mojeek reliability), SearXNG instance discovery/probing, the Reddit 403 degradation path,
+non-search-engine routes, official APIs, the decision checklist, and caveats — from:
 
 `references/search-engine-access-guide.md`
 

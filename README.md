@@ -259,7 +259,7 @@ against the bundle's copy):
 
 | Skill | Teaches the agent |
 | --- | --- |
-| `browser-search` | Finding and reading web sources across both tiers — the net tools first (cheapest), then `web_search`, then the browser tools — with route triage and a full runbook (`references/search-engine-access-guide.md` — search-engine captchas/403s, SearXNG fallback, Wayback Machine, site search, and API routes). |
+| `browser-search` | Finding and reading web sources across both tiers — the net tools first (cheapest), then `web_search`, then the browser tools — with route triage and a full runbook (`references/search-engine-access-guide.md` — net-engine walls (DDG burst throttle, Brave 429, Mojeek reliability), SearXNG fallback, the Reddit 403 browser-tier path, Wayback Machine, site search, and API routes). |
 | `browser-navigation` | Moving around the shared page: URL forms (URLs, hostnames, `localhost` ports, file paths, search text), reading the `browser_goto` summary, redirects/statuses/timeouts, and the single shared-page model. |
 | `browser-interaction` | DOM automation through `browser_evaluate`: reading state, clicking, typing, form filling, scrolling, waiting for async content, JSON-safe results, and batching reads into one evaluate. |
 | `browser-visual-check` | Verifying renders with `browser_screenshot` (viewport/full page, PNG/JPEG) and keeping the shared page presentable for the human watching the live pane. |
