@@ -11,7 +11,7 @@ import { createNetRuntime, type NetRuntimeConfig } from '../src/net.ts'
 const LIVE = process.env.DSH_BROWSER_LIVE === '1'
 const config: NetRuntimeConfig = {
   siteSearchIntervalMs: 3000,
-  searchEngines: ['ddg', 'brave'],
+  searchEngines: ['ddg', 'brave', 'mojeek'],
   fallbackOnEmpty: true,
   fetchTimeoutMs: 20000,
 }
@@ -33,16 +33,32 @@ test('live: DDG Lite search returns structured results', { skip: !LIVE }, async 
   }
 })
 
-test('live: engine chain falls back to Brave when DDG yields nothing', { skip: !LIVE }, async () => {
+test('live: engine chain falls back across ddg → brave → mojeek', { skip: !LIVE }, async () => {
   try {
     const outcome = await net.search('obscure-nonexistent-query-xyzzy-42', undefined, 5, 'auto')
-    assert.ok(['ddg', 'brave'].includes(outcome.engine))
+    assert.ok(['ddg', 'brave', 'mojeek'].includes(outcome.engine))
     assert.ok(outcome.results.length >= 0)
   } catch (error) {
-    // Both engines can wall a burst of automation traffic; the chain's
+    // All three engines can wall a burst of automation traffic; the chain's
     // error names everything it tried, which is the contract under test.
     const message = error instanceof Error ? error.message : String(error)
-    assert.ok(/tried: ddg|tried: ddg, brave|All configured/i.test(message), `unexpected error: ${message}`)
+    assert.ok(/tried: ddg|All configured/i.test(message), `unexpected error: ${message}`)
+  }
+})
+
+test('live: Mojeek search returns structured results (datacenter-IP fallback)', { skip: !LIVE }, async () => {
+  try {
+    const outcome = await net.search('rust async runtime', undefined, 5, 'mojeek')
+    assert.ok(outcome.engine === 'mojeek')
+    assert.ok(outcome.results.length >= 3, `expected results, got ${outcome.results.length}`)
+    for (const result of outcome.results) {
+      assert.ok(result.title.length > 0)
+      assert.ok(result.url.startsWith('http'))
+      assert.ok(result.domain.length > 0, 'domain derived from URL')
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    assert.ok(/no parseable|bot check|failed|timeout/i.test(message), `unexpected error: ${message}`)
   }
 })
 
