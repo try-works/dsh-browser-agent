@@ -1,7 +1,7 @@
 {
   "name": "@try-works/dsh-browser-agent",
-  "description": "DeepSeek Harness bundle: a Chrome browser for agents (browser_goto / browser_evaluate / browser_screenshot tools) with a live two-way pane inside the DSH Web GUI. The browser engine is a fork of zenbu-labs/terminal-browser with the React Ink terminal UI replaced by a DSH tool surface and web pane.",
-  "version": "0.6.0",
+  "description": "DeepSeek Harness bundle: a Chrome browser for agents (browser_goto / browser_evaluate / browser_screenshot and 12 more) plus a no-key net search tier (browser_search / browser_fetch / Reddit tools, ported from pi-lynx) with a live two-way pane inside the DSH Web GUI. The browser engine is a fork of zenbu-labs/terminal-browser with the React Ink terminal UI replaced by a DSH tool surface and web pane.",
+  "version": "0.7.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -24,7 +24,8 @@
     "skills",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "LICENSES"
   ],
   "license": "ISC",
   "publishConfig": {
@@ -36,7 +37,9 @@
     "dsh-plugin",
     "browser",
     "puppeteer",
-    "headless-chrome"
+    "headless-chrome",
+    "web-search",
+    "reddit"
   ],
   "dsh": {
     "bundle": {
@@ -52,8 +55,8 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-skill": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.5",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "dependencies": {
@@ -62,36 +65,38 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "file:D:/deepseek-harness/vendor/cordis",
     "@deepseek-ai/cosmokit": "file:D:/deepseek-harness/vendor/cosmokit",
-    "@deepseek-ai/schemastery": "file:D:/deepseek-harness/vendor/schemastery",
-    "@deepseek-ai/dsh-tools": "file:D:/deepseek-harness/packages/core/tools",
-    "@deepseek-ai/dsh-skill": "file:D:/deepseek-harness/packages/skill/skill",
-    "@deepseek-ai/dsh-llm": "file:D:/deepseek-harness/packages/llm/llm",
-    "@deepseek-ai/dsh-scope": "file:D:/deepseek-harness/packages/core/scope",
-    "@deepseek-ai/dsh-session": "file:D:/deepseek-harness/packages/core/session",
-    "@deepseek-ai/dsh-invariants": "file:D:/deepseek-harness/packages/runtime-diagnostics/invariants",
-    "@deepseek-ai/dsh-brand": "file:D:/deepseek-harness/packages/util/brand",
-    "@deepseek-ai/dsh-timeout": "file:D:/deepseek-harness/packages/util/timeout",
-    "@deepseek-ai/dsh-system-prompt": "file:D:/deepseek-harness/packages/core/system-prompt",
     "@deepseek-ai/dsh-agent": "file:D:/deepseek-harness/packages/core/agent",
-    "@deepseek-ai/dsh-user-approval": "file:D:/deepseek-harness/packages/interaction/user-approval",
     "@deepseek-ai/dsh-attachment": "file:D:/deepseek-harness/packages/attachment/attachment",
-    "@deepseek-ai/dsh-code-runtime": "file:D:/deepseek-harness/packages/code-runtime/code-runtime",
+    "@deepseek-ai/dsh-brand": "file:D:/deepseek-harness/packages/util/brand",
     "@deepseek-ai/dsh-client-runtime": "file:D:/deepseek-harness/packages/client/runtime",
     "@deepseek-ai/dsh-client-ui-layout": "file:D:/deepseek-harness/packages/client/ui-layout",
     "@deepseek-ai/dsh-client-ui-slots": "file:D:/deepseek-harness/packages/client/ui-slots",
+    "@deepseek-ai/dsh-code-runtime": "file:D:/deepseek-harness/packages/code-runtime/code-runtime",
     "@deepseek-ai/dsh-host-webserver": "file:D:/deepseek-harness/packages/host/webserver",
+    "@deepseek-ai/dsh-invariants": "file:D:/deepseek-harness/packages/runtime-diagnostics/invariants",
+    "@deepseek-ai/dsh-llm": "file:D:/deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/dsh-scope": "file:D:/deepseek-harness/packages/core/scope",
+    "@deepseek-ai/dsh-session": "file:D:/deepseek-harness/packages/core/session",
+    "@deepseek-ai/dsh-skill": "file:D:/deepseek-harness/packages/skill/skill",
+    "@deepseek-ai/dsh-system-prompt": "file:D:/deepseek-harness/packages/core/system-prompt",
+    "@deepseek-ai/dsh-timeout": "file:D:/deepseek-harness/packages/util/timeout",
+    "@deepseek-ai/dsh-tools": "file:D:/deepseek-harness/packages/core/tools",
+    "@deepseek-ai/dsh-user-approval": "file:D:/deepseek-harness/packages/interaction/user-approval",
+    "@deepseek-ai/schemastery": "file:D:/deepseek-harness/vendor/schemastery",
+    "@types/node": "^20.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",
-    "@types/node": "^20.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",
+    "tsx": "^4.23.12",
     "typescript": "^5.6.0"
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && tsdown",
     "bundle": "tsdown",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/net.test.ts",
     "prepublishOnly": "pnpm build"
   },
   "packageManager": "pnpm@11.7.0"

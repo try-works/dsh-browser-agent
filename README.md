@@ -1,20 +1,29 @@
 # @try-works/dsh-browser-agent
 
 A **DeepSeek Harness (DSH)** bundle that gives agents a real Chrome browser,
-and gives you a live window onto it. One shared page, three agent tools, and a
-collapsible browser pane docked inside the DSH Web GUI that streams that page
-and takes real mouse/keyboard input.
+a no-key net search tier, and a live window onto the browsing. One shared page,
+fifteen browser tools, six net tools, and a collapsible browser pane docked
+inside the DSH Web GUI that streams that page and takes real mouse/keyboard
+input.
 
 It is a fork of [zenbu-labs/terminal-browser](https://github.com/zenbu-labs/terminal-browser)
 with the terminal UI replaced by a DSH tool surface and a web pane — the same
 idea (pixels out, synthetic input in), built on the harness's own plugin,
-module, and slot systems.
+module, and slot systems. The net search tier ports the no-key engine chain of
+[dabito/pi-lynx](https://github.com/dabito/pi-lynx) (MIT).
 
 ## What this plugin is and does
 
-- **Three tools for agents** — `browser_goto`, `browser_evaluate`,
-  `browser_screenshot` — all driving **one shared Chrome page** that persists
-  across calls, so an agent can navigate, read, interact, and capture.
+- **Six net tools for agents** — `browser_fetch`, `browser_search`,
+  `browser_search_github`, `browser_search_wikipedia`, `browser_reddit_search`,
+  `browser_reddit_thread` — no-key, plain-HTTP search and fetch (DuckDuckGo
+  Lite → Brave HTML chain with automatic fallback, plus Reddit access). The
+  cheapest routes for research; degrade to the browser tools when a wall
+  appears.
+- **Fifteen browser tools** — navigation, structured DOM interaction, history,
+  capture, accessibility, and tabs — all driving **one shared Chrome page**
+  that persists across calls, so an agent can navigate, read, interact, and
+  capture.
 - **A live pane for humans** — a right-docked, collapsible, resizable panel in
   the DSH Web GUI showing that same page in real time. You can watch the agent
   browse and take over yourself: click, drag, scroll, type, or use the address
@@ -94,6 +103,27 @@ profile's `cordis.patch.yml`:
 | `userDataDir` | `''` (temp profile) | Chrome profile directory. Empty = a fresh temporary profile per launch. Set an absolute path to persist cookies, logins, and storage across launches (note: session cookies without an expiry are still session-only). |
 | `connectUrl` | `''` (disabled) | CDP browser URL for **My Chrome** mode. When set, the pane's mode toggle can connect to a Chrome you launched with `chrome.exe --remote-debugging-port=9222 --user-data-dir=<non-default dir>`, adopting its real tabs, logins, and fingerprint — the mode that passes bot-protection walls (e.g. Cloudflare Turnstile). Launch flags are ignored in connect mode. |
 | `stealth` | `false` | Stealth plugin mode: launch our own Chrome **without** `--enable-automation` (so `navigator.webdriver` is false), headed, `AutomationControlled` disabled, persistent profile. Much better odds against bot walls than plain puppeteer, though not your personal fingerprint — for the sure thing use My Chrome mode. |
+| `searchEngines` | `'ddg,brave'` | Engine chain for the net search tools, tried in order: `ddg` (DuckDuckGo Lite) and `brave` (Brave HTML). |
+| `siteSearchIntervalMs` | `3000` | Minimum delay between consecutive site-filtered net searches (rate-limit politeness). |
+| `fallbackOnEmpty` | `true` | Continue with the next engine when one returns no results. |
+| `fetchTimeoutMs` | `15000` | Per-request timeout for the net tools (fetch/search/reddit). |
+
+## The net tools (no-key search & fetch)
+
+The net tier is a port of the pi-lynx engine chain (`browser_search` =
+DuckDuckGo Lite → Brave HTML with automatic fallback), plus a plain-HTTP page
+fetch and Reddit access — no Chrome, no API key, no JS rendering. These are
+the cheapest routes for research; the browser-search skill's triage puts them
+first and degrades to the browser tools when a datacenter IP gets throttled.
+
+| Tool | What it does |
+| --- | --- |
+| `browser_fetch` | Fetch a URL as readable text over plain HTTP: `{url, finalUrl, status, text, truncated, links}`. |
+| `browser_search` | Search the web: ranked `{title, snippet, domain, url}` rows plus an instant answer when the engine has one. `site: "github" \| "wikipedia" \| <domain>`, `engine: "auto" \| "ddg" \| "brave"`, `maxResults`. |
+| `browser_search_github` | `browser_search` restricted to `github.com` — repos, issues, discussions. |
+| `browser_search_wikipedia` | `browser_search` restricted to `en.wikipedia.org`. |
+| `browser_reddit_search` | Reddit post search (old.reddit HTML first, the public JSON search as fallback): title, subreddit, author, score, comments, permalink. |
+| `browser_reddit_thread` | A Reddit thread via its public `.json` endpoint: post fields plus the top comments. |
 
 ## The browser tools
 
@@ -221,14 +251,14 @@ closes Chrome.
 
 ## The bundled skills
 
-The bundle registers four packaged skills on `ctx.skills` (the dsh-plugin
+The bundle registers five packaged skills on `ctx.skills` (the dsh-plugin
 packaged-skill standard: each `skills/<name>/SKILL.md` ships in the package
 and registers with a directory `resourceBase`, so relative references resolve
 against the bundle's copy):
 
 | Skill | Teaches the agent |
 | --- | --- |
-| `browser-search` | Finding and reading web sources through the tools and `web_search`, with route triage and a full runbook (`references/search-engine-access-guide.md` — search-engine captchas/403s, SearXNG fallback, Wayback Machine, site search, and API routes). |
+| `browser-search` | Finding and reading web sources across both tiers — the net tools first (cheapest), then `web_search`, then the browser tools — with route triage and a full runbook (`references/search-engine-access-guide.md` — search-engine captchas/403s, SearXNG fallback, Wayback Machine, site search, and API routes). |
 | `browser-navigation` | Moving around the shared page: URL forms (URLs, hostnames, `localhost` ports, file paths, search text), reading the `browser_goto` summary, redirects/statuses/timeouts, and the single shared-page model. |
 | `browser-interaction` | DOM automation through `browser_evaluate`: reading state, clicking, typing, form filling, scrolling, waiting for async content, JSON-safe results, and batching reads into one evaluate. |
 | `browser-visual-check` | Verifying renders with `browser_screenshot` (viewport/full page, PNG/JPEG) and keeping the shared page presentable for the human watching the live pane. |
@@ -240,7 +270,16 @@ against the bundle's copy):
 pnpm install     # links the type-only harness devDependencies
 pnpm build       # tsc declarations + tsdown: lib/index.js (host) and lib/client.js (client)
 pnpm typecheck   # tsc --noEmit
+pnpm test        # offline parser/runtime tests (node --import tsx --test test/net.test.ts)
 ```
+
+The net tier is TDD'd: `test/net.test.ts` runs offline against committed
+fixtures in `test/fixtures/`, and `test/net.live.test.ts` exercises the real
+engines when opted in (`$env:DSH_BROWSER_LIVE = '1'; node --import tsx --test
+test/net.live.test.ts` in PowerShell). The live suite tolerates the documented
+walls — DDG Lite throttling and Reddit 403s from datacenter IPs are accepted
+as environment states, not failures; the parsers are proven by the offline
+fixtures.
 
 `prepublishOnly` runs `pnpm build`, so `npm publish` always ships fresh
 artifacts.

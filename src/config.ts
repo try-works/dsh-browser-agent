@@ -37,6 +37,18 @@ export const DEFAULT_USER_DATA_DIR = ''
 /** Default CDP connect URL: empty = connect mode unavailable until set. */
 export const DEFAULT_CONNECT_URL = ''
 
+/** Default search engine chain: DuckDuckGo Lite, then Brave HTML (pi-lynx port). */
+export const DEFAULT_SEARCH_ENGINES = 'ddg,brave'
+
+/** Default delay between consecutive search-engine queries (ms) — politeness. */
+export const DEFAULT_SITE_SEARCH_INTERVAL_MS = 3_000
+
+/** Default: fall back to the next engine when one returns no results. */
+export const DEFAULT_FALLBACK_ON_EMPTY = true
+
+/** Default net fetch timeout (ms) for fetch/search/reddit tool calls. */
+export const DEFAULT_FETCH_TIMEOUT_MS = 15_000
+
 /** Viewport shape accepted in config. */
 export interface Viewport {
   width: number
@@ -45,7 +57,28 @@ export interface Viewport {
 
 /** Plugin config surface (declared interface; defaults come from `Config`). */
 export interface Config {
-  /** Absolute path to a Chrome/Chromium executable. Default: system Chrome on Windows. */
+  // --- Net (pi-lynx port) ---
+  /**
+   * Comma-separated engine chain for browser_search, tried in order:
+   * `ddg` (DuckDuckGo Lite HTML) and `brave` (Brave HTML). Default: `ddg,brave`.
+   */
+  searchEngines?: string
+  /**
+   * Delay in milliseconds between consecutive search-engine queries so we
+   * don't trip per-engine throttling. Default: 3000.
+   */
+  siteSearchIntervalMs?: number
+  /**
+   * When one engine returns no results, continue with the next engine in the
+   * chain instead of failing. Default: true.
+   */
+  fallbackOnEmpty?: boolean
+  /**
+   * Timeout in milliseconds for the net tools (fetch, search, reddit).
+   * Default: 15000.
+   */
+  fetchTimeoutMs?: number
+  // --- Browser ---
   chromePath?: string
   /** Default viewport applied to new pages. Default: 1920x1080. */
   viewport?: Viewport
@@ -112,6 +145,10 @@ export const Config: z<Config> = z.object({
   userDataDir: z.string().default(DEFAULT_USER_DATA_DIR),
   connectUrl: z.string().default(DEFAULT_CONNECT_URL),
   stealth: z.boolean().default(false),
+  searchEngines: z.string().default(DEFAULT_SEARCH_ENGINES),
+  siteSearchIntervalMs: z.number().default(DEFAULT_SITE_SEARCH_INTERVAL_MS),
+  fallbackOnEmpty: z.boolean().default(DEFAULT_FALLBACK_ON_EMPTY),
+  fetchTimeoutMs: z.number().default(DEFAULT_FETCH_TIMEOUT_MS),
 })
 
 /** Resolved config after schemastery defaults are applied. */

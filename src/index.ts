@@ -21,6 +21,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import { Config, type ResolvedConfig } from './config.ts'
 import { registerBrowserTools } from './tools.ts'
+import { buildNetRuntime, registerNetTools } from './net-tools.ts'
 import { registerBrowserSkills } from './skills.ts'
 import { BrowserRuntime } from './browser.ts'
 import { registerBrowserPane } from './pane.ts'
@@ -29,7 +30,9 @@ import { registerBrowserPane } from './pane.ts'
 // raw profile config and fills defaults before `apply` runs.
 export { Config }
 export { BrowserRuntime, normalizeUrl } from './browser.ts'
+export { createNetRuntime, parseSearchEngineList } from './net.ts'
 export type { Config as BrowserAgentConfig, ResolvedConfig, Viewport } from './config.ts'
+export type { SearchResult, RedditSearchResult, RedditThread, SearchEngineName } from './net.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = '@try-works/dsh-browser-agent'
@@ -54,10 +57,13 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(function* () {
     const runtime = new BrowserRuntime(resolved)
     const disposers = registerBrowserTools(ctx, resolved, runtime)
+    const net = buildNetRuntime(resolved)
+    const disposersNet = registerNetTools(ctx, resolved, net)
     const disposeSkills = registerBrowserSkills(ctx)
     const disposePane = resolved.pane ? registerBrowserPane(ctx, runtime) : undefined
     yield () => {
       for (const dispose of disposers) dispose()
+      for (const dispose of disposersNet) dispose()
       for (const dispose of disposeSkills) dispose()
       disposePane?.()
       void runtime.close()

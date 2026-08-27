@@ -13,4 +13,17 @@ replaces the React Ink terminal user interface with DeepSeek Harness tools
 (browser_goto / browser_evaluate / browser_screenshot). The stdio JSON-RPC
 worker and terminal shell were removed.
 
-See LICENSE for the full license text.
+The net tier (src/net.ts and src/net-tools.ts) ports the no-key search engine
+chain and Reddit access from:
+
+  pi-lynx — https://github.com/dabito/pi-lynx
+  Copyright (c) 2026 pi-lynx contributors
+  License: MIT
+
+The port replaces pi-lynx's `lynx -dump` page fetching with direct HTML
+parsing (no external binary), keeps the DDG Lite / Brave HTML engine chain
+with fallback-on-empty and site: spacing, the GitHub/Wikipedia site wrappers,
+old.reddit search, and the Reddit thread JSON endpoint.
+
+See LICENSE for the full license text (ISC). The pi-lynx MIT notice is kept in
+LICENSES/pi-lynx-MIT.txt.
