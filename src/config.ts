@@ -49,6 +49,20 @@ export const DEFAULT_FALLBACK_ON_EMPTY = true
 /** Default net fetch timeout (ms) for fetch/search/reddit tool calls. */
 export const DEFAULT_FETCH_TIMEOUT_MS = 15_000
 
+/** Default: work mode off (risky-click gate inactive until enabled). */
+export const DEFAULT_WORK_MODE_ENABLED = false
+
+/** Default risky-click protections, applied when work mode is enabled. */
+export const DEFAULT_WORK_MODE = {
+  enabled: DEFAULT_WORK_MODE_ENABLED,
+  approveSubmit: true,
+  approveSend: true,
+  approveAmountsUsd: true,
+  // SAFETY: the empty array literal is the default for a config field the
+  // schemastery schema types as z.array(z.string()) — [] satisfies it exactly.
+  allowlist: [] as string[],
+} as const
+
 /** Viewport shape accepted in config. */
 export interface Viewport {
   width: number
@@ -130,6 +144,23 @@ export interface Config {
    * the "My Chrome" mode. Default: false (plain puppeteer launch).
    */
   stealth?: boolean
+  /**
+   * Work Mode — credential-isolated web automation (ChatGPT Work parity).
+   * When `enabled`, the risky-click gate routes consequential clicks
+   * (form submits, send/delete/cancel verbs, dollar amounts) through the
+   * approval stack before dispatch. Default: false.
+   */
+  workMode?: {
+    enabled?: boolean
+    /** Ask before form-submit clicks. Default: true. */
+    approveSubmit?: boolean
+    /** Ask before send-like clicks. Default: true. */
+    approveSend?: boolean
+    /** Ask before clicks whose visible text carries a dollar amount. Default: true. */
+    approveAmountsUsd?: boolean
+    /** Origins (hostnames) whose clicks never ask. Default: empty. */
+    allowlist?: string[]
+  }
 }
 
 /** Schemastery config with defaults; cordis applies this before `apply`. */
@@ -151,6 +182,13 @@ export const Config: z<Config> = z.object({
   siteSearchIntervalMs: z.number().default(DEFAULT_SITE_SEARCH_INTERVAL_MS),
   fallbackOnEmpty: z.boolean().default(DEFAULT_FALLBACK_ON_EMPTY),
   fetchTimeoutMs: z.number().default(DEFAULT_FETCH_TIMEOUT_MS),
+  workMode: z.object({
+    enabled: z.boolean().default(DEFAULT_WORK_MODE_ENABLED),
+    approveSubmit: z.boolean().default(DEFAULT_WORK_MODE.approveSubmit),
+    approveSend: z.boolean().default(DEFAULT_WORK_MODE.approveSend),
+    approveAmountsUsd: z.boolean().default(DEFAULT_WORK_MODE.approveAmountsUsd),
+    allowlist: z.array(z.string()).default(DEFAULT_WORK_MODE.allowlist),
+  }).default(DEFAULT_WORK_MODE),
 })
 
 /** Resolved config after schemastery defaults are applied. */

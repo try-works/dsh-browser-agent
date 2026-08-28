@@ -25,6 +25,7 @@ import { buildNetRuntime, registerNetTools } from './net-tools.ts'
 import { registerBrowserSkills } from './skills.ts'
 import { BrowserRuntime } from './browser.ts'
 import { registerBrowserPane } from './pane.ts'
+import { registerRiskyClickGate } from './gate-hook.ts'
 
 // Re-export the schemastery `Config` so cordis's plugin loader validates the
 // raw profile config and fills defaults before `apply` runs.
@@ -61,11 +62,13 @@ export function apply(ctx: Context, config: Config): void {
     const disposersNet = registerNetTools(ctx, resolved, net)
     const disposeSkills = registerBrowserSkills(ctx)
     const disposePane = resolved.pane ? registerBrowserPane(ctx, runtime) : undefined
+    const disposeGate = registerRiskyClickGate(ctx, resolved, runtime)
     yield () => {
       for (const dispose of disposers) dispose()
       for (const dispose of disposersNet) dispose()
       for (const dispose of disposeSkills) dispose()
       disposePane?.()
+      disposeGate()
       void runtime.close()
     }
   })

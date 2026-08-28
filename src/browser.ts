@@ -688,6 +688,42 @@ export class BrowserRuntime {
     }
   }
 
+  /**
+   * Probe the element a selector matches WITHOUT clicking — the risky-click
+   * gate reads the target's tag, visible text, submit-ness, and page origin
+   * before the real click dispatches.
+   */
+  async probeClick(selector: string): Promise<{ ok: boolean; tag: string; text: string; isSubmit: boolean; origin: string; message?: string }> {
+    const page = await this.ensurePage()
+    const handle = await page.$(selector).catch(() => null)
+    if (!handle) {
+      return { ok: false, tag: '', text: '', isSubmit: false, origin: page.url(), message: `no element matching "${selector}"` }
+    }
+    try {
+      const info = await handle.evaluate((el) => {
+        const tag = el.tagName.toLowerCase()
+        // SAFETY: el is an Element; `type` only exists on form controls, and
+        // the tag check narrows to exactly input|button before the read.
+        const type = tag === 'input' || tag === 'button' ? (el as HTMLInputElement | HTMLButtonElement).type : null
+        const isSubmit = type === 'submit' || tag === 'button' && type === ''
+        return {
+          tag,
+          text: (el.textContent || '').trim().slice(0, 200),
+          isSubmit,
+        }
+      })
+      let origin = ''
+      try {
+        origin = new URL(page.url()).hostname
+      } catch { /* page URL may be blank/about: — leave origin empty */ }
+      return { ok: true, tag: info.tag, text: info.text, isSubmit: info.isSubmit, origin }
+    } catch (error) {
+      return { ok: false, tag: '', text: '', isSubmit: false, origin: '', message: error instanceof Error ? error.message : String(error) }
+    } finally {
+      await handle.dispose().catch(() => {})
+    }
+  }
+
   /** Type text into the first element matching a CSS selector (real key events). */
   async type(selector: string, text: string): Promise<{ ok: boolean; value: string; message?: string }> {
     const page = await this.ensurePage()
