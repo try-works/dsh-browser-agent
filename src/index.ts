@@ -26,6 +26,7 @@ import { registerBrowserSkills } from './skills.ts'
 import { BrowserRuntime } from './browser.ts'
 import { registerBrowserPane } from './pane.ts'
 import { registerRiskyClickGate } from './gate-hook.ts'
+import { registerSecretFirewall } from './firewall-hook.ts'
 
 // Re-export the schemastery `Config` so cordis's plugin loader validates the
 // raw profile config and fills defaults before `apply` runs.
@@ -63,12 +64,14 @@ export function apply(ctx: Context, config: Config): void {
     const disposeSkills = registerBrowserSkills(ctx)
     const disposePane = resolved.pane ? registerBrowserPane(ctx, runtime) : undefined
     const disposeGate = registerRiskyClickGate(ctx, resolved, runtime)
+    const disposeFirewall = registerSecretFirewall(ctx, resolved)
     yield () => {
       for (const dispose of disposers) dispose()
       for (const dispose of disposersNet) dispose()
       for (const dispose of disposeSkills) dispose()
       disposePane?.()
       disposeGate()
+      disposeFirewall()
       void runtime.close()
     }
   })
