@@ -97,32 +97,37 @@ const C = {
 } as const
 
 /** Expanding pane width bounds and collapsed rail width (px). */
-const DEFAULT_WIDTH = 520
-const MIN_WIDTH = 320
+const MIN_WIDTH = 340
 const RAIL_WIDTH = 34
 
-/** Maximum pane width: 96% of the window (a full desktop page needs the room). */
-function maxPaneWidth(): number {
-  return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.96))
+/** Small, compact pane width: ~10% of the window (so a pane never dominates the screen). */
+function defaultPaneWidth(): number {
+  return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.10))
 }
 
 /**
- * A desktop layout (1920x1080) shown in a narrow pane renders as a postage
- * stamp, so a pane that would be narrower than ~half the window is widened to
- * 96% on load — the old 520px default is treated as "no meaningful choice".
- * The drag handle and an explicitly-set wider saved width still apply.
+ * Maximum pane width: the page should stay a readable side pane, not fill the
+ * screen, so cap it at ~45% of the window (the user can still drag wider than
+ * the compact default, but the pane never takes over the display).
+ */
+function maxPaneWidth(): number {
+  return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.45))
+}
+
+/**
+ * The pane is a compact side panel: it defaults to ~10% of the window. A stored
+ * width is honored only when it is genuinely useful (at or above the compact
+ * default and not the auto-widened full-width value); a stale or auto-widened
+ * value falls back to the compact default.
  */
 function loadWidth(): number {
   let stored = NaN
   try {
     stored = Number(window.localStorage.getItem('dsh-browser-pane-width'))
   } catch { /* storage unavailable */ }
-  const half = Math.max(MIN_WIDTH, Math.round(window.innerWidth / 2))
-  const wide = maxPaneWidth()
-  // No stored value, or a stale narrow one (<= the old 520 default, or under
-  // half the window): open near-full-width so a desktop page is legible.
-  if (!Number.isFinite(stored) || stored < MIN_WIDTH || stored <= half) return wide
-  return Math.min(stored, wide)
+  const compact = defaultPaneWidth()
+  if (!Number.isFinite(stored) || stored < MIN_WIDTH) return compact
+  return Math.min(stored, maxPaneWidth())
 }
 
 /** Persist the pane width (best-effort). */
@@ -166,7 +171,7 @@ const panelStyle: CSSProperties = {
   top: 0,
   right: 0,
   bottom: 0,
-  width: DEFAULT_WIDTH,
+  width: MIN_WIDTH,
   background: C.panel,
   borderLeft: `1px solid ${C.panelBorder}`,
   boxShadow: '-10px 0 28px rgba(0, 0, 0, 0.4)',
@@ -324,22 +329,6 @@ function BrowserPane(): ReturnType<typeof h> {
   const widthRef = useRef(width)
   widthRef.current = width
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
-
-  // Self-correct a stale/narrow pane: if the current width is under half the
-  // window (the old 520px default, or a pane that mounted before the window was
-  // fully sized), grow it to 96% so a desktop page is legible. Runs on mount
-  // and on window resize, and keeps the drag-only semantics (an explicitly-set
-  // wide width is left alone; only the undersized case is corrected).
-  useEffect(() => {
-    const widenIfStale = (): void => {
-      const wide = maxPaneWidth()
-      const half = Math.max(MIN_WIDTH, Math.round(window.innerWidth / 2))
-      setWidth(current => (current < half || !Number.isFinite(current)) ? wide : current)
-    }
-    widenIfStale()
-    window.addEventListener('resize', widenIfStale)
-    return () => { window.removeEventListener('resize', widenIfStale) }
-  }, [])
 
   // A bump here tears down and re-opens the EventSource below, forcing the
   // server to replay the current state + a live frame. This is the "reconnect
