@@ -100,20 +100,22 @@ const C = {
 const MIN_WIDTH = 340
 const RAIL_WIDTH = 34
 
-/** Default pane width: 1080px — a wide, readable column that fits a 1920px page comfortably. */
-const DEFAULT_PANE_WIDTH = 1080
+/** Default pane width: ~10% of the window — the pane is a compact side panel. */
+function defaultPaneWidth(): number {
+  return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.10))
+}
 
-/** Maximum pane width: ~80% of the window (a page is large but never fills the display). */
+/** Maximum pane width: grows, but never takes over the whole display (~80%). */
 function maxPaneWidth(): number {
   return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.80))
 }
 
 /**
- * The pane is a wide side panel: it defaults to 1080px so a full-HD desktop
- * page is readable, while the page itself renders at 1920x1080. A stored
- * width is honored only when it is a genuine deliberate choice — anything at
- * or below the legacy 520px default is treated as stale and falls back to
- * the wide default.
+ * The pane is a compact side panel: it defaults to ~10% of the window. The
+ * page inside it renders at the configured viewport (1920x1080), so the page
+ * layout is full HD while the pane stays a narrow peek. A stored width is
+ * honored only when it is a genuine deliberate choice — anything at or below
+ * the legacy 520px default is treated as stale and falls back to compact.
  */
 const LEGACY_DEFAULT_WIDTH = 520
 
@@ -122,10 +124,10 @@ function loadWidth(): number {
   try {
     stored = Number(window.localStorage.getItem('dsh-browser-pane-width'))
   } catch { /* storage unavailable */ }
-  const wide = DEFAULT_PANE_WIDTH
+  const compact = defaultPaneWidth()
   // No stored value, a sub-min width, or the legacy factory default (520):
-  // open wide. Only a stored width above the legacy default is a real choice.
-  if (!Number.isFinite(stored) || stored < MIN_WIDTH || stored <= LEGACY_DEFAULT_WIDTH) return wide
+  // open compact. Only a stored width above the legacy default is a real choice.
+  if (!Number.isFinite(stored) || stored < MIN_WIDTH || stored <= LEGACY_DEFAULT_WIDTH) return compact
   return Math.min(stored, maxPaneWidth())
 }
 
