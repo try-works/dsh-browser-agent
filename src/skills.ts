@@ -29,6 +29,9 @@ const SKILL_NAMES = [
   'browser-interaction',
   'browser-visual-check',
   'browser-multitab',
+  'work-login',
+  'work-appointment',
+  'work-forms',
 ] as const
 
 /** Routing descriptions shown by skill discovery (match each SKILL.md frontmatter). */
@@ -38,6 +41,9 @@ const SKILL_DESCRIPTIONS = {
   'browser-interaction': 'Use when interacting with a page through browser_evaluate — reading DOM state, clicking, typing, filling forms, scrolling, waiting for async content, and returning JSON-safe results, all on the shared page the agent and the user watch together.',
   'browser-visual-check': 'Use when verifying how a page looks — capture the shared page with browser_screenshot (viewport or full page, PNG or JPEG), confirm renders and layouts after DOM changes, and keep the shared page presentable for the human watching the live pane.',
   'browser-multitab': 'Use when working with more than one page in the shared browser — opening, listing, switching, and closing tabs, understanding which tab the other browser tools act on, and how popups and target=_blank links become tabs.',
+  'work-login': 'Use when a task requires the agent to sign in to a website on behalf of the user — the supervised-login flow (work_login_begin / work_login_cancel / work_login_status, the pane Sign-in banner, Seal/Abort, and the session vault) that lets the human enter credentials through the live pane so the model never sees the username or password.',
+  'work-appointment': 'Use when a task is a transactional appointment-booking workflow — DMV visits, doctor/dentist bookings, insurance claims, government services — where form submissions are consequential and may need approval: find the booking form, fill it, and let the risky-click gate and the user gate consequential submits.',
+  'work-forms': 'Use when filling out any web form with the browser tools — multi-field forms, selects, radios, dates, checkboxes, CAPTCHA/2FA walls — especially in Work Mode where consequential submits route through the approval gate and credential fields must never enter the model context.',
 } satisfies Record<(typeof SKILL_NAMES)[number], string>
 
 /** The bundled skill directory for one skill (this module lives in the bundle at lib/index.js). */
