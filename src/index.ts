@@ -19,6 +19,8 @@ import type { Context } from '@deepseek-ai/cordis'
 // and `ctx.skills`.
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { Config, type ResolvedConfig } from './config.ts'
 import { registerBrowserTools } from './tools.ts'
 import { buildNetRuntime, registerNetTools } from './net-tools.ts'
@@ -29,6 +31,8 @@ import { registerRiskyClickGate } from './gate-hook.ts'
 import { registerSecretFirewall } from './firewall-hook.ts'
 import { createLoginMode } from './login-mode.ts'
 import { registerLoginMode, registerLoginPane } from './login-hook.ts'
+import { createVaultStore } from './vault.ts'
+import { registerVaultTool, registerVaultPane } from './vault-hook.ts'
 
 // Re-export the schemastery `Config` so cordis's plugin loader validates the
 // raw profile config and fills defaults before `apply` runs.
@@ -69,7 +73,11 @@ export function apply(ctx: Context, config: Config): void {
     const disposeFirewall = registerSecretFirewall(ctx, resolved)
     const loginMode = createLoginMode()
     const disposersLogin = registerLoginMode(ctx, resolved, runtime, loginMode)
-    const disposeLoginPane = resolved.pane ? registerLoginPane(ctx, runtime, loginMode) : undefined
+    const vaultDir = resolved.vaultDir === '' ? join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'vault') : resolved.vaultDir
+    const vault = createVaultStore(vaultDir)
+    const disposeLoginPane = resolved.pane ? registerLoginPane(ctx, runtime, loginMode, vault) : undefined
+    const disposeVaultTool = registerVaultTool(ctx, resolved, vault)
+    const disposeVaultPane = resolved.pane ? registerVaultPane(ctx, runtime, vault) : undefined
     yield () => {
       for (const dispose of disposers) dispose()
       for (const dispose of disposersNet) dispose()
@@ -79,6 +87,8 @@ export function apply(ctx: Context, config: Config): void {
       disposeFirewall()
       for (const dispose of disposersLogin) dispose()
       disposeLoginPane?.()
+      disposeVaultTool()
+      disposeVaultPane?.()
       void runtime.close()
     }
   })

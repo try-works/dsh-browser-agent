@@ -52,6 +52,9 @@ export const DEFAULT_FETCH_TIMEOUT_MS = 15_000
 /** Default: work mode off (risky-click gate inactive until enabled). */
 export const DEFAULT_WORK_MODE_ENABLED = false
 
+/** Default vault directory: empty = resolve to ~/.dsh/vault at runtime. */
+export const DEFAULT_VAULT_DIR = ''
+
 /** Default risky-click protections, applied when work mode is enabled. */
 export const DEFAULT_WORK_MODE = {
   enabled: DEFAULT_WORK_MODE_ENABLED,
@@ -161,6 +164,12 @@ export interface Config {
     /** Origins (hostnames) whose clicks never ask. Default: empty. */
     allowlist?: string[]
   }
+  /**
+   * Session-vault directory for sealed logins (encrypted at rest). Empty
+   * (default) resolves to `~/.dsh/vault` at runtime; each sealed session is
+   * one AES-256-GCM blob under a 0600 key file.
+   */
+  vaultDir?: string
 }
 
 /** Schemastery config with defaults; cordis applies this before `apply`. */
@@ -189,6 +198,7 @@ export const Config: z<Config> = z.object({
     approveAmountsUsd: z.boolean().default(DEFAULT_WORK_MODE.approveAmountsUsd),
     allowlist: z.array(z.string()).default(DEFAULT_WORK_MODE.allowlist),
   }).default(DEFAULT_WORK_MODE),
+  vaultDir: z.string().default(DEFAULT_VAULT_DIR),
 })
 
 /** Resolved config after schemastery defaults are applied. */

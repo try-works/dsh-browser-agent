@@ -27,6 +27,7 @@ import type { Protocol } from 'puppeteer-core'
 import type { BrowserRuntime } from './browser.ts'
 import type { ResolvedConfig } from './config.ts'
 import type { LoginMode, CookieEntry, LoginState } from './login-mode.ts'
+import type { VaultStore } from './vault.ts'
 
 /** Boundary schema for the login-seal route. */
 const LoginSealSchema = z.object({
@@ -196,7 +197,7 @@ export function registerLoginMode(ctx: Context, config: ResolvedConfig, runtime:
 }
 
 /** Register the pane seal/cancel routes; returns the disposer. */
-export function registerLoginPane(ctx: Context, runtime: BrowserRuntime, mode: LoginMode): (() => void) | undefined {
+export function registerLoginPane(ctx: Context, runtime: BrowserRuntime, mode: LoginMode, vault?: VaultStore): (() => void) | undefined {
   const webServer = ctx.get('webServer')
   if (!webServer) return undefined
 
@@ -216,6 +217,10 @@ export function registerLoginPane(ctx: Context, runtime: BrowserRuntime, mode: L
         if (!outcome.ok) {
           json(res, 400, { ok: false, message: outcome.reason ?? 'seal failed' })
           return
+        }
+        const sealed = mode.sealed()
+        if (sealed !== null && vault !== undefined) {
+          vault.save(sealed)
         }
         json(res, 200, { ok: true, state: mode.state(), origin: mode.origin(), sealed: mode.sealed() !== null })
       } catch (error) {
