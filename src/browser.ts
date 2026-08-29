@@ -21,7 +21,7 @@ import { isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Browser, LaunchOptions, Page, Target } from 'puppeteer-core'
 import type { JsonValue } from '@deepseek-ai/dsh-tools'
-import type { ResolvedConfig } from './config.ts'
+import type { ResolvedConfig, Viewport } from './config.ts'
 
 const HAS_AUTHORITY = /^[a-z][a-z0-9+.-]*:\/\//i
 const SCHEMES_WITHOUT_HOST = /^(?:data|mailto|tel|about|blob|chrome|view-source):/i
@@ -163,10 +163,14 @@ export class BrowserRuntime {
   private readonly foreignTargets = new Set<Target>()
   /** Tab-set listeners (the pane restarts its screencast on switches). */
   private readonly tabListeners = new Set<(tabs: TabInfo[]) => void>()
+  /** Configured page viewport, exposed for the pane's screencast capture. */
+  readonly viewport: Viewport
 
   constructor(private readonly config: ResolvedConfig) {
     // The `stealth` config picks the STARTUP plugin mode; the pane toggle
     // switches modes live from then on.
+    // SAFETY: config is a resolved, validated object; reading a known field.
+    this.viewport = config.viewport
     this.mode = config.stealth ? 'stealth' : 'own'
   }
 

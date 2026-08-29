@@ -299,11 +299,15 @@ export function registerBrowserPane(ctx: Context, runtime: BrowserRuntime): (() 
         }
       })
       await session.send('Page.enable')
+      // Capture at the device resolution, not downscaled, so the pane is sharp.
+      // CDP caps maxWidth/maxHeight at the viewport; matching it avoids the
+      // 1600x1000 screen at quality 60 that made the pane look soft.
+      const vp = runtime.viewport
       await session.send('Page.startScreencast', {
         format: 'jpeg',
-        quality: 60,
-        maxWidth: 1600,
-        maxHeight: 1000,
+        quality: 90,
+        maxWidth: vp.width,
+        maxHeight: vp.height,
         everyNthFrame: 1,
       })
       // The pane owns the page while streaming: focus emulation keeps

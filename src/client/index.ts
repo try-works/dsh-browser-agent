@@ -96,23 +96,27 @@ const C = {
   input: '#121318',
 } as const
 
-/** Expanded pane width bounds and collapsed rail width (px). */
+/** Expanding pane width bounds and collapsed rail width (px). */
 const DEFAULT_WIDTH = 520
 const MIN_WIDTH = 320
 const RAIL_WIDTH = 34
 
-/** Maximum pane width: 85% of the window. */
+/** Maximum pane width: 96% of the window (a full desktop page needs the room). */
 function maxPaneWidth(): number {
-  return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.85))
+  return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.96))
 }
 
-/** Restore the persisted pane width, clamped to the current window. */
+/**
+ * A desktop layout (1920x1080) shown in a narrow pane renders as a postage
+ * stamp, so a first-time pane opens near-full-width instead of the old 520px
+ * default; the drag handle and persisted width still apply afterwards.
+ */
 function loadWidth(): number {
   let stored = NaN
   try {
     stored = Number(window.localStorage.getItem('dsh-browser-pane-width'))
   } catch { /* storage unavailable */ }
-  if (!Number.isFinite(stored) || stored < MIN_WIDTH) return DEFAULT_WIDTH
+  if (!Number.isFinite(stored) || stored < MIN_WIDTH) return maxPaneWidth()
   return Math.min(stored, maxPaneWidth())
 }
 
