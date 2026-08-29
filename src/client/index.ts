@@ -65,6 +65,13 @@ interface PaneTab {
   active: boolean
 }
 
+/** Login-mode state (mirrors the host login-state route payload). */
+interface PaneLoginState {
+  state: 'idle' | 'pending' | 'sealing' | 'sealed'
+  origin: string
+  sealed: boolean
+}
+
 /** One input message the pane posts to the host route. */
 type PaneInputMessage =
   | { type: 'mouse-move' | 'mouse-down' | 'mouse-up'; x: number; y: number; button: 'left' | 'right' | 'middle' | 'none'; modifiers: number }
@@ -299,6 +306,7 @@ function BrowserPane(): ReturnType<typeof h> {
   const [collapsed, setCollapsed] = useState(false)
   const [addr, setAddr] = useState('')
   const [width, setWidth] = useState<number>(loadWidth)
+  const [login, setLogin] = useState<PaneLoginState>({ state: 'idle', origin: '', sealed: false })
 
   const imgRef = useRef<HTMLImageElement | null>(null)
   const addrFocusRef = useRef(false)
@@ -334,6 +342,20 @@ function BrowserPane(): ReturnType<typeof h> {
       setTabs(payload)
     })
     return () => { source.close() }
+  }, [])
+
+  // Login-mode state poll: the user channel (Seal/Abort) lives here in the
+  // pane, and this keeps the banner honest when the model begins/cancels.
+  useEffect(() => {
+    const refresh = (): void => {
+      void fetch('/browser-pane/login-state')
+        .then(res => res.json())
+        .then((payload: PaneLoginState) => { setLogin(payload) })
+        .catch(() => {})
+    }
+    refresh()
+    const id = window.setInterval(refresh, 1500)
+    return () => { window.clearInterval(id) }
   }, [])
 
   // Reserve horizontal space for the pane/rail on the page body so the whole
@@ -636,6 +658,58 @@ function BrowserPane(): ReturnType<typeof h> {
         : 'The shared browser is idle — the agent has not opened a page yet. '
           + 'Use the address bar above to open one, or ask the agent to browse.')
 
+  // Supervised-login banner: the user channel. While pending, the human types
+  // credentials directly into the page here and Seals; Abort cancels.
+  const loginBanner = login.state === 'idle'
+    ? null
+    : h('div', {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 10px',
+        background: login.state === 'sealed' ? '#12351e' : '#3a2f12',
+        borderBottom: `1px solid ${C.panelBorder}`,
+        color: C.text,
+        fontSize: 12,
+        flexShrink: 0,
+      },
+    },
+      h('span', { style: { flex: 1, minWidth: 0 } },
+        login.state === 'pending' || login.state === 'sealing'
+          ? `Supervised login on ${login.origin || 'this site'} — type your credentials in the pane above, then seal. The agent cannot read the page while you sign in.`
+          : `Session sealed on ${login.origin || 'this site'}. The agent may proceed; cookies never leave the vault.`),
+      login.state === 'pending' || login.state === 'sealing'
+        ? h('button', {
+          type: 'button',
+          onClick: () => { void fetch('/browser-pane/login-seal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }) },
+          style: {
+            background: '#3fbf6e',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 6,
+            padding: '4px 12px',
+            fontSize: 12,
+            cursor: 'pointer',
+            flexShrink: 0,
+          },
+        }, 'Seal')
+        : null,
+      h('button', {
+        type: 'button',
+        onClick: () => { void fetch('/browser-pane/login-cancel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }) },
+        style: {
+          background: 'transparent',
+          color: C.dim,
+          border: '1px solid #3a3d49',
+          borderRadius: 6,
+          padding: '4px 10px',
+          fontSize: 12,
+          cursor: 'pointer',
+          flexShrink: 0,
+        },
+      }, login.state === 'sealed' ? 'Discard' : 'Abort'))
+
   return createPortal(h('div', { style: { ...panelStyle, width }, 'data-dsh-browser-pane': 'expanded' },
     h('div', {
       style: handleStyle,
@@ -652,6 +726,23 @@ function BrowserPane(): ReturnType<typeof h> {
       h(ToggleButton, { expanded: true, onClick: () => { setCollapsed(true) } }),
       h('span', { style: statusDot, title: state.active ? 'Browser connected' : 'Browser idle' }),
       h('span', { style: { color: C.text, fontSize: 12, fontWeight: 600, flexShrink: 0 } }, 'Browser'),
+      login.state === 'idle'
+        ? h('button', {
+          type: 'button',
+          title: 'Start a supervised sign-in: the agent is blocked from reading the page while you type your credentials here, then Seal captures only the session cookies.',
+          onClick: () => { void fetch('/browser-pane/login-begin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }) },
+          style: {
+            background: 'transparent',
+            color: C.accent,
+            border: '1px solid #4f9cf9',
+            borderRadius: 6,
+            padding: '3px 9px',
+            fontSize: 12,
+            cursor: 'pointer',
+            flexShrink: 0,
+          },
+        }, 'Sign in')
+        : null,
       h('form', {
         style: { display: 'flex', flex: 1, gap: 6, minWidth: 0 },
         onSubmit,
@@ -679,6 +770,7 @@ function BrowserPane(): ReturnType<typeof h> {
           },
         }, 'Go'))),
     strip,
+    loginBanner,
     body), document.body)
 }
 

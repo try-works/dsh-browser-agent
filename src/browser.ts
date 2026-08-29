@@ -507,6 +507,16 @@ export class BrowserRuntime {
     return this.ensurePage()
   }
 
+  /** The active tab's current URL, or empty when no page is live yet. */
+  async pageUrl(): Promise<string> {
+    try {
+      const page = await this.ensurePage()
+      return page.url()
+    } catch {
+      return ''
+    }
+  }
+
   /** The tab list (never empty: the last tab is never left closed). */
   async tabs(): Promise<TabInfo[]> {
     this.prune()
