@@ -112,10 +112,11 @@ function maxPaneWidth(): number {
 
 /**
  * The pane is a compact side panel: it defaults to ~10% of the window. The
- * page inside it renders at the configured viewport (1080px), so it is readable
- * without the pane filling the screen. A stored width is honored only when it
- * is a genuine deliberate choice — anything at or below the legacy 520px
- * default is treated as stale and falls back to the compact width.
+ * page inside it renders at the configured viewport (1920x1080), so it is
+ * laid out as a full desktop page without the pane filling the screen. A
+ * stored width is honored only when it is a genuine deliberate choice —
+ * anything at or below the legacy 520px default is treated as stale and falls
+ * back to the compact width.
  */
 const LEGACY_DEFAULT_WIDTH = 520
 

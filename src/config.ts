@@ -13,8 +13,8 @@ import z from '@deepseek-ai/schemastery'
 /** Default Chrome/Chromium executable (Windows; override via config). */
 export const DEFAULT_CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 
-/** Default viewport for new pages: 1080px wide (a readable desktop layout). */
-export const DEFAULT_VIEWPORT = { width: 1080, height: 1080 } as const
+/** Default viewport for new pages: 1920x1080 (full HD desktop layout). */
+export const DEFAULT_VIEWPORT = { width: 1920, height: 1080 } as const
 
 /** Default page.goto navigation timeout (ms). */
 export const DEFAULT_NAV_TIMEOUT_MS = 45_000
