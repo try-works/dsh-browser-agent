@@ -325,6 +325,22 @@ function BrowserPane(): ReturnType<typeof h> {
   widthRef.current = width
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
+  // Self-correct a stale/narrow pane: if the current width is under half the
+  // window (the old 520px default, or a pane that mounted before the window was
+  // fully sized), grow it to 96% so a desktop page is legible. Runs on mount
+  // and on window resize, and keeps the drag-only semantics (an explicitly-set
+  // wide width is left alone; only the undersized case is corrected).
+  useEffect(() => {
+    const widenIfStale = (): void => {
+      const wide = maxPaneWidth()
+      const half = Math.max(MIN_WIDTH, Math.round(window.innerWidth / 2))
+      setWidth(current => (current < half || !Number.isFinite(current)) ? wide : current)
+    }
+    widenIfStale()
+    window.addEventListener('resize', widenIfStale)
+    return () => { window.removeEventListener('resize', widenIfStale) }
+  }, [])
+
   // A bump here tears down and re-opens the EventSource below, forcing the
   // server to replay the current state + a live frame. This is the "reconnect
   // feed" affordance: it re-attaches a stale pane without reloading the whole
