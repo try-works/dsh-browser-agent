@@ -108,16 +108,21 @@ function maxPaneWidth(): number {
 
 /**
  * A desktop layout (1920x1080) shown in a narrow pane renders as a postage
- * stamp, so a first-time pane opens near-full-width instead of the old 520px
- * default; the drag handle and persisted width still apply afterwards.
+ * stamp, so a pane that would be narrower than ~half the window is widened to
+ * 96% on load — the old 520px default is treated as "no meaningful choice".
+ * The drag handle and an explicitly-set wider saved width still apply.
  */
 function loadWidth(): number {
   let stored = NaN
   try {
     stored = Number(window.localStorage.getItem('dsh-browser-pane-width'))
   } catch { /* storage unavailable */ }
-  if (!Number.isFinite(stored) || stored < MIN_WIDTH) return maxPaneWidth()
-  return Math.min(stored, maxPaneWidth())
+  const half = Math.max(MIN_WIDTH, Math.round(window.innerWidth / 2))
+  const wide = maxPaneWidth()
+  // No stored value, or a stale narrow one (<= the old 520 default, or under
+  // half the window): open near-full-width so a desktop page is legible.
+  if (!Number.isFinite(stored) || stored < MIN_WIDTH || stored <= half) return wide
+  return Math.min(stored, wide)
 }
 
 /** Persist the pane width (best-effort). */
