@@ -31,6 +31,9 @@ module, and slot systems. The net search tier ports the no-key engine chain of
 - **Five packaged skills** — bundled guidance (plus a search runbook) that
   teaches agents how to find web sources, navigate, automate pages, verify
   renders, and manage tabs through the tools.
+- **Work Mode** — credential-isolated web automation at ChatGPT Work parity:
+  a risky-click approval gate, a secret firewall, supervised login, and an
+  encrypted session vault (see below).
 - **URL normalization** — tools and address bar accept URLs, hostnames,
   `localhost:port`, existing local file paths, or plain search text.
 
@@ -264,6 +267,51 @@ against the bundle's copy):
 | `browser-interaction` | DOM automation through `browser_evaluate`: reading state, clicking, typing, form filling, scrolling, waiting for async content, JSON-safe results, and batching reads into one evaluate. |
 | `browser-visual-check` | Verifying renders with `browser_screenshot` (viewport/full page, PNG/JPEG) and keeping the shared page presentable for the human watching the live pane. |
 | `browser-multitab` | Working with several pages at once: tab tools, which tab the other tools act on, popups-as-tabs, and tab discipline. |
+| `work-login` | The supervised-login flow (sign in without the model seeing credentials): `work_login_begin/cancel/status`, the pane Sign-in banner, Seal/Abort, and the session vault. |
+| `work-appointment` | Transactional booking workflows (DMV, doctor, insurance): find the form, fill it, let the risky-click gate handle the consequential submit. |
+| `work-forms` | Form-filling mechanics and the Work Mode rules: never type a password, never invent personal data, submits ask. |
+
+## Work Mode
+
+Credential-isolated web automation at ChatGPT Work parity. When enabled
+(`workMode.enabled: true`), four layers keep credentials and consequential
+actions out of the model's hands:
+
+1. **Risky-click gate** (`tools/pre-execute`) — a click on a form submit,
+   a send/delete/cancel verb, or a dollar-amount button is intercepted before
+   dispatch and routed through the approval stack. No approval channel = the
+   click is denied (fail closed).
+2. **Secret firewall** (`tools/post-execute`) — `document.cookie`, JWTs,
+   bearer tokens, `password=`/`token=` assignments, and `Set-Cookie` lines in
+   `browser_evaluate`/`browser_read`/`browser_fetch` results are redacted to
+   `[redacted]` before the model sees them.
+3. **Supervised login** — `work_login_begin` (or the pane **Sign in** button)
+   suspends every `browser_*` tool while the user types credentials directly
+   into the live pane (synthetic CDP input — values never enter the model
+   context). **Seal** captures the session cookies; **Abort** discards.
+4. **Session vault** — sealed sessions persist AES-256-GCM encrypted in
+   `~/.dsh/vault` (`vault.key` 0600 + `sessions.vault`). `work_vault_status`
+   lists origins + cookie names only; restore/revoke are pane routes.
+
+### Configuration
+
+```yaml
+- id: dsh-browser-agent
+  config:
+    workMode:
+      enabled: true            # default false
+      approveSubmit: true      # ask before form-submit clicks
+      approveSend: true        # ask before send-like clicks
+      approveAmountsUsd: true  # ask before dollar-amount clicks
+      allowlist: []            # hostnames that never ask
+    vaultDir: ''               # empty = ~/.dsh/vault
+```
+
+### The model's tools
+
+- `work_login_begin` / `work_login_cancel` / `work_login_status` — drive and
+  inspect the supervised-login flow (never the credentials).
+- `work_vault_status` — list sealed sessions (origins + cookie names only).
 
 ## Development
 
@@ -271,16 +319,17 @@ against the bundle's copy):
 pnpm install     # links the type-only harness devDependencies
 pnpm build       # tsc declarations + tsdown: lib/index.js (host) and lib/client.js (client)
 pnpm typecheck   # tsc --noEmit
-pnpm test        # offline parser/runtime tests (node --import tsx --test test/net.test.ts)
+pnpm test        # offline tests: net, gates, firewall, login-mode, vault
 ```
 
-The net tier is TDD'd: `test/net.test.ts` runs offline against committed
-fixtures in `test/fixtures/`, and `test/net.live.test.ts` exercises the real
-engines when opted in (`$env:DSH_BROWSER_LIVE = '1'; node --import tsx --test
-test/net.live.test.ts` in PowerShell). The live suite tolerates the documented
-walls — DDG Lite throttling and Reddit 403s from datacenter IPs are accepted
-as environment states, not failures; the parsers are proven by the offline
-fixtures.
+The tiers are TDD'd: `test/net.test.ts` runs offline against committed
+fixtures in `test/fixtures/`, `test/gates.test.ts` / `test/firewall.test.ts` /
+`test/login-mode.test.ts` / `test/vault.test.ts` exercise the Work Mode pure
+cores, and `test/net.live.test.ts` exercises the real engines when opted in
+(`$env:DSH_BROWSER_LIVE = '1'; node --import tsx --test test/net.live.test.ts`
+in PowerShell). The live suite tolerates the documented walls — DDG Lite
+throttling and Reddit 403s from datacenter IPs are accepted as environment
+states, not failures; the parsers are proven by the offline fixtures.
 
 `prepublishOnly` runs `pnpm build`, so `npm publish` always ships fresh
 artifacts.
