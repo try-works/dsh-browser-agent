@@ -200,12 +200,14 @@ export class BrowserRuntime {
   }
 
   /** Apply timeouts (and the configured viewport for pages WE create). */
-  private async setupPage(page: Page, resize: boolean): Promise<void> {
+  private async setupPage(page: Page): Promise<void> {
     page.setDefaultNavigationTimeout(this.config.navTimeoutMs)
     page.setDefaultTimeout(this.config.scriptTimeoutMs)
-    if (resize) {
-      await page.setViewport({ width: this.config.viewport.width, height: this.config.viewport.height })
-    }
+    // Always stamp the configured viewport so the page layout is deterministic
+    // regardless of mode. In 'own' this matches the launch viewport; in
+    // 'stealth'/'connect' the Chrome window's native size would otherwise leak
+    // a 1024x768 default and the page would not be a readable 1080px layout.
+    await page.setViewport({ width: this.config.viewport.width, height: this.config.viewport.height })
   }
 
   /** Wire the shared browser event handlers (launch and connect alike). */
@@ -362,7 +364,7 @@ export class BrowserRuntime {
     this.targets = []
     this.active = 0
     for (const page of await browser.pages()) {
-      await this.setupPage(page, false)
+      await this.setupPage(page)
       this.pages.push(page)
       this.targets.push(page.target())
     }
@@ -477,7 +479,7 @@ export class BrowserRuntime {
       void page.close().catch(() => {})
       return
     }
-    await this.setupPage(page, this.mode === 'own')
+    await this.setupPage(page)
     this.pages.push(page)
     this.targets.push(target)
     this.active = this.pages.length - 1
@@ -488,7 +490,7 @@ export class BrowserRuntime {
   private async createPage(): Promise<Page> {
     const browser = await this.ensureBrowser()
     const page = await browser.newPage()
-    await this.setupPage(page, this.mode === 'own')
+    await this.setupPage(page)
     const target = page.target()
     this.pages.push(page)
     this.targets.push(target)
