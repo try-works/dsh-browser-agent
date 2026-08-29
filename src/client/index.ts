@@ -116,17 +116,22 @@ function maxPaneWidth(): number {
 
 /**
  * The pane is a compact side panel: it defaults to ~10% of the window. A stored
- * width is honored only when it is genuinely useful (at or above the compact
- * default and not the auto-widened full-width value); a stale or auto-widened
- * value falls back to the compact default.
+ * width is honored only when it is a genuine deliberate choice — at least the
+ * old 520px default (the factory value) is treated as stale, so a pane never
+ * stays pinned at the legacy width. A stale or auto-widened value falls back
+ * to the compact default.
  */
+const LEGACY_DEFAULT_WIDTH = 520
+
 function loadWidth(): number {
   let stored = NaN
   try {
     stored = Number(window.localStorage.getItem('dsh-browser-pane-width'))
   } catch { /* storage unavailable */ }
   const compact = defaultPaneWidth()
-  if (!Number.isFinite(stored) || stored < MIN_WIDTH) return compact
+  // No stored value, a sub-min width, or the legacy factory default (520):
+  // open compact. Only a stored width above the legacy default is a real choice.
+  if (!Number.isFinite(stored) || stored < MIN_WIDTH || stored <= LEGACY_DEFAULT_WIDTH) return compact
   return Math.min(stored, maxPaneWidth())
 }
 
