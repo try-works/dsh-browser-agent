@@ -316,7 +316,15 @@ function BrowserPane(): ReturnType<typeof h> {
   widthRef.current = width
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
-  // Frame/state feed. EventSource reconnects on its own.
+  // A bump here tears down and re-opens the EventSource below, forcing the
+  // server to replay the current state + a live frame. This is the "reconnect
+  // feed" affordance: it re-attaches a stale pane without reloading the whole
+  // DSH tab (which a hard refresh would do — and which is undesirable).
+  const [feedNonce, setFeedNonce] = useState(0)
+
+  // Frame/state feed. EventSource reconnects on its own on network drop, but a
+  // *stale* feed (e.g. the screencast was re-attached to a replaced page after a
+  // mode switch) needs a manual teardown/reopen, hence the `feedNonce` dep.
   useEffect(() => {
     const source = new EventSource('/browser-pane/stream')
     source.addEventListener('frame', (event) => {
@@ -342,7 +350,7 @@ function BrowserPane(): ReturnType<typeof h> {
       setTabs(payload)
     })
     return () => { source.close() }
-  }, [])
+  }, [feedNonce])
 
   // Login-mode state poll: the user channel (Seal/Abort) lives here in the
   // pane, and this keeps the banner honest when the model begins/cancels.
@@ -722,7 +730,8 @@ function BrowserPane(): ReturnType<typeof h> {
     h('div', { style: headerStyle },
       h(NavButton, { label: '‹', title: 'Go back', onClick: () => { post('/browser-pane/back', { action: 'back' }) } }),
       h(NavButton, { label: '›', title: 'Go forward', onClick: () => { post('/browser-pane/forward', { action: 'forward' }) } }),
-      h(NavButton, { label: '⟳', title: 'Reload page', onClick: () => { post('/browser-pane/reload', { action: 'reload' }) } }),
+      h(NavButton, { label: '⟳', title: 'Reload the browser page', onClick: () => { post('/browser-pane/reload', { action: 'reload' }) } }),
+      h(NavButton, { label: '⟲', title: 'Reconnect the pane feed — re-attach a stale view without reloading the tab; clears the cached frame so the live one re-streams', onClick: () => { setFrame(null); setFeedNonce(n => n + 1) } }),
       h(ToggleButton, { expanded: true, onClick: () => { setCollapsed(true) } }),
       h('span', { style: statusDot, title: state.active ? 'Browser connected' : 'Browser idle' }),
       h('span', { style: { color: C.text, fontSize: 12, fontWeight: 600, flexShrink: 0 } }, 'Browser'),
