@@ -100,26 +100,22 @@ const C = {
 const MIN_WIDTH = 340
 const RAIL_WIDTH = 34
 
-/** Small, compact pane width: ~10% of the window (so a pane never dominates the screen). */
+/** Default pane width: ~10% of the window — the pane is a compact side panel. */
 function defaultPaneWidth(): number {
   return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.10))
 }
 
-/**
- * Maximum pane width: the page should stay a readable side pane, not fill the
- * screen, so cap it at ~45% of the window (the user can still drag wider than
- * the compact default, but the pane never takes over the display).
- */
+/** Maximum pane width: grows, but never takes over the whole display (~80%). */
 function maxPaneWidth(): number {
-  return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.45))
+  return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.80))
 }
 
 /**
- * The pane is a compact side panel: it defaults to ~10% of the window. A stored
- * width is honored only when it is a genuine deliberate choice — at least the
- * old 520px default (the factory value) is treated as stale, so a pane never
- * stays pinned at the legacy width. A stale or auto-widened value falls back
- * to the compact default.
+ * The pane is a compact side panel: it defaults to ~10% of the window. The
+ * page inside it renders at the configured viewport (1080px), so it is readable
+ * without the pane filling the screen. A stored width is honored only when it
+ * is a genuine deliberate choice — anything at or below the legacy 520px
+ * default is treated as stale and falls back to the compact width.
  */
 const LEGACY_DEFAULT_WIDTH = 520
 
