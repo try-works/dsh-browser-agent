@@ -1,45 +1,103 @@
 # @try-works/dsh-browser-agent
 
-A **DeepSeek Harness (DSH)** bundle that gives agents a real Chrome browser,
-a no-key net search tier, and a live window onto the browsing. One shared page,
-fifteen browser tools, six net tools, and a collapsible browser pane docked
-inside the DSH Web GUI that streams that page and takes real mouse/keyboard
+A **DeepSeek Harness (DSH)** plugin that hands your agent a real, controllable
+web browser — a shared Chrome page, a no-key search & fetch tier, a live
+human-watchable pane, and a credential-isolated "Work Mode" for signing in and
+filling forms without the agent ever seeing your username or password.
+
+An agent running DSH gets **25 tools** — 15 browser tools, 6 net/search tools,
+and 4 Work-Mode tools — all driving **one shared Chrome page** that persists
+across calls, plus a **live pane** docked inside the DSH Web GUI that streams
+that page in real time and lets you take over with real mouse and keyboard
 input.
+
+## What it is
+
+This is a plugin bundle for [DeepSeek Harness](https://github.com/deepseek-ai/harness)
+(Cordis-composed). It mounts from a single composition row and splits into two
+halves:
+
+- **Host half (Node process)** — runs Chrome (via
+  [puppeteer-core](https://www.npmjs.com/package/puppeteer-core)), registers the
+  25 tools, the packaged skills, and the pane's HTTP routes.
+- **Client half (browser bundle)** — the pane UI, mounted into the Web GUI's
+  `shell.overlay` slot.
 
 It is a fork of [zenbu-labs/terminal-browser](https://github.com/zenbu-labs/terminal-browser)
 with the terminal UI replaced by a DSH tool surface and a web pane — the same
-idea (pixels out, synthetic input in), built on the harness's own plugin,
-module, and slot systems. The net search tier ports the no-key engine chain of
+idea (pixels out, synthetic input in), built on the harness's own plugin, module,
+and slot systems. The net search tier ports the no-key engine chain of
 [dabito/pi-lynx](https://github.com/dabito/pi-lynx) (MIT).
 
-## What this plugin is and does
+## Why it matters
 
-- **Six net tools for agents** — `browser_fetch`, `browser_search`,
+Agents that only read text struggle with the modern web: JavaScript-rendered
+pages, login walls, bot-protection, forms, and anything needing a real browser
+session. This plugin closes that gap by giving the agent a **real Chrome** with
+all its capabilities, while keeping a human in the loop through the pane and a
+security layer that isolates credentials. Chrome runs as a
+**separate OS process** launched by the plugin, so a browser crash can never
+take the harness down — the next call simply relaunches.
+
+## What it does
+
+- **A real, persistent browser** — one shared Chrome with any number of tabs
+  and one active. Navigate, read, click, type, wait, screenshot, inspect the
+  accessibility tree, and manage tabs; the page stays put between calls.
+- **Search without keys** — plain-HTTP search & fetch with an engine chain
+  (DuckDuckGo Lite → Brave HTML → Mojeek, automatic fallback) plus Reddit
+  access. No Chrome, no API key, no JS rendering — the cheapest research route.
+- **A live pane for humans** — a right-docked, collapsible, resizable window in
+  the DSH Web GUI that streams the shared page via CDP screencast and takes
+  your real mouse/keyboard input. Watch the agent browse and take over any
+  time.
+- **Work Mode** — credential-isolated web automation: a risky-click approval
+  gate, a secret firewall, supervised login, and an encrypted session vault
+  (see below).
+- **Bot-wall friendly** — three launch modes: headless (your own), **stealth**
+  (our own headed Chrome, no automation fingerprint), and **My Chrome**
+  (connect to a Chrome *you* launched, adopting its real logins and identity —
+  the mode that clears Cloudflare Turnstile).
+- **URL normalization** — tools and the address bar accept URLs, hostnames,
+  `localhost:port`, local file paths, or plain search text.
+
+## Use cases
+
+- **Research that needs a real page** — read a JS-rendered article, pull
+  structured data, compare listings, or scrape an API behind a browser session.
+  Start with the no-key net tools; fall back to the browser when a wall appears.
+- **Test and verify your own web apps** — drive a running frontend: navigate,
+  fill forms, click, wait for async content, and `browser_screenshot` the result
+  to confirm a render or layout. The live pane lets you and the agent watch the
+  same page.
+- **Sign in on your behalf — without sharing your password** — the
+  `work_login_*` flow lets you type credentials into the pane while the agent
+  is locked out, then seals only the session cookies into an encrypted vault.
+  The agent can restore the session later, never having seen the password.
+- **Transactional web workflows** — booking appointments (DMV, doctor,
+  dentist), filing insurance claims, filling multi-field government or vendor
+  forms. The risky-click gate pauses before consequential submits so you
+  approve them yourself.
+- **Checking a site behind login** — your subscription, dashboard, or inbox
+  (Gmail, GitHub, a SaaS console). Sign in once via the pane; the vault keeps
+  the session, `work_vault_status` lists it without exposing values, and the
+  agent can re-open it.
+
+## The tools at a glance
+
+All 25 tools, grouped:
+
+- **Browser** (15): `browser_goto`, `browser_evaluate`, `browser_screenshot`,
+  `browser_click`, `browser_type`, `browser_read`, `browser_wait`,
+  `browser_back`, `browser_forward`, `browser_reload`, `browser_a11y`,
+  `browser_tabs`, `browser_tab_open`, `browser_tab_switch`, `browser_tab_close`.
+- **Net / search** (6): `browser_fetch`, `browser_search`,
   `browser_search_github`, `browser_search_wikipedia`, `browser_reddit_search`,
-  `browser_reddit_thread` — no-key, plain-HTTP search and fetch (DuckDuckGo
-  Lite → Brave HTML chain with automatic fallback, plus Reddit access). The
-  cheapest routes for research; degrade to the browser tools when a wall
-  appears.
-- **Fifteen browser tools** — navigation, structured DOM interaction, history,
-  capture, accessibility, and tabs — all driving **one shared Chrome page**
-  that persists across calls, so an agent can navigate, read, interact, and
-  capture.
-- **A live pane for humans** — a right-docked, collapsible, resizable panel in
-  the DSH Web GUI showing that same page in real time. You can watch the agent
-  browse and take over yourself: click, drag, scroll, type, or use the address
-  bar. Everything lands in the page through the Chrome DevTools Protocol.
-- **Five packaged skills** — bundled guidance (plus a search runbook) that
-  teaches agents how to find web sources, navigate, automate pages, verify
-  renders, and manage tabs through the tools.
-- **Work Mode** — credential-isolated web automation at ChatGPT Work parity:
-  a risky-click approval gate, a secret firewall, supervised login, and an
-  encrypted session vault (see below).
-- **URL normalization** — tools and address bar accept URLs, hostnames,
-  `localhost:port`, existing local file paths, or plain search text.
+  `browser_reddit_thread`.
+- **Work Mode** (4): `work_login_begin`, `work_login_cancel`,
+  `work_login_status`, `work_vault_status`.
 
-Chrome runs as a **separate OS process** launched by the plugin
-([puppeteer-core](https://www.npmjs.com/package/puppeteer-core)), so a browser
-crash can never take the harness down — the next call simply relaunches.
+Each is documented in full in the sections below.
 
 ## Install
 
@@ -163,8 +221,9 @@ reference semantics):
 
 Expanded, the pane docks **full-height on the right edge** (like a mirrored
 sidebar); collapsed, it shrinks to a **thin vertical rail** with a toggle.
-Its left edge is a **drag handle** — drag to resize (320 px to 85 % of the
-window), the width persists across reloads, and the whole GUI reflows around
+Its left edge is a **drag handle** — drag to resize (from a compact ~10 % up
+to ~80 % of the window), the width persists across reloads, and the whole GUI
+reflows around
 it. The header carries **back / forward / reload** buttons next to the address
 bar, and the tab strip ends with a **browser-mode toggle**.
 
@@ -222,7 +281,7 @@ pane server:
 - A `BrowserRuntime` owns one lazily launched Chrome and a **tab session**:
   any number of tabs, one active. On a crash or disconnect the cached handles
   are cleared and the next call relaunches.
-- All fifteen tools register on the host `tools` registry; the five packaged
+- All tools register on the host `tools` registry; the packaged
   skills register on `skills`, each with its bundled `skills/<name>/`
   directory as its resource base.
 - The pane server registers the three routes above on the shared web server
@@ -255,7 +314,7 @@ closes Chrome.
 
 ## The bundled skills
 
-The bundle registers five packaged skills on `ctx.skills` (the dsh-plugin
+The bundle registers eight packaged skills on `ctx.skills` (the dsh-plugin
 packaged-skill standard: each `skills/<name>/SKILL.md` ships in the package
 and registers with a directory `resourceBase`, so relative references resolve
 against the bundle's copy):
